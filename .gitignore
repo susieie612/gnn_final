@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+
+venv/
+env/
+.env/
+
+data/
+checkpoints/
+*.npy
+*.pt
+*.flax
+
+.DS_Store
+
