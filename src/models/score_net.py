@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 class ScoreNet(nn.Module):
     hidden_dim: int = 128
-    out_dim: int = 2
+    out_dim: int = 1
 
     @nn.compact
 

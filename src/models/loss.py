@@ -8,7 +8,7 @@ def denoising_score_matching_loss(params, score_net, key, theta, x_t, x_next, sd
     
     """
 
-    k1, k2 =jax.rnadom.split(key)
+    k1, k2 =jax.random.split(key)
 
     # sample diffusion time from uniform distribution
     # TODO: later could change the distribution of a to focus training on certain level of noise
