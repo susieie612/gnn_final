@@ -5,7 +5,6 @@ import jax.numpy as jnp
 def denoising_score_matching_loss(params, score_net, key, theta, x_t, x_next, sde):
     """
     Eq. 4 of the paper (Denoising score matching loss)
-    
     """
 
     k1, k2 =jax.random.split(key)
