@@ -1,28 +1,46 @@
 import jax
 import jax.numpy as jnp
 import optax
-from src.simulations.simulators import LotkaVolterra, lv_prior_predictive_proposal
+from src.simulators import LotkaVolterra, lv_prior_predictive_proposal
 from src.local_score_net import LocalScoreNet
 from src.loss import denoising_score_matching_loss
 from src.reverse import Diffuser, EulerMaruyama
 from src.composition_score_fn import GAUSSScoreFn
+from src.config import config
+
 
 class SDE:
     def __init__(self, beta_min=0.1, beta_max=20.0):
         self.beta_min, self.beta_max = beta_min, beta_max
         self.T_min, self.T_max = 1e-4, 1.0
+    
+    def mean_coeff(self, t):
+        # t: (batch,)
+        coeff = jnp.exp(-0.25 * t**2 * (self.beta_max - self.beta_min) - 0.5 * t * self.beta_min)
+        return coeff
+
+    def mean(self, t, x0):
+        # t: (batch, ),  x0: (128, 4)
+        return self.mean_coeff(t)[:, jnp.newaxis] * x0
 
     def std(self, t):
         log_mean_coeff = -0.25 * t**2 * (self.beta_max - self.beta_min) - 0.5 * t * self.beta_min
-        return jnp.sqrt(1.0 - jnp.exp(2.0 * log_mean_coeff))
+        var = 1.0 - jnp.exp(2.0 * log_mean_coeff)
+        return jnp.sqrt(jnp.maximum(var, 1e-10)) # clip the variance
 
 def marginal_prior_score(a, theta, sde, prior):
     # Denoising prior score p(theta_a)
     return prior.score(theta) 
 
 # ALGORITHM 1: train local score
-def train(key, model, sim, proposal_fn):
+def train(key, model, sim, proposal_fn, config):
     sde = SDE()
+
+    # get values from config dictionary
+    lr = config.get('learning_rate', 5e-4)
+    num_steps = config.get('num_steps', 10000)
+    batch_size = config.get('batch_size', 128)
+
     optimizer = optax.adamw(learning_rate=5e-4) 
     
     init_theta = jnp.ones((1, 4)) # 4 params for LV
@@ -35,7 +53,7 @@ def train(key, model, sim, proposal_fn):
         loss, grads = jax.value_and_grad(denoising_score_matching_loss)(
             params, model, k, theta, x_batch[:, 0], x_batch[:, 1], sde
         ) 
-        updates, opt_state = optimizer.update(grads, opt_state)
+        updates, opt_state = optimizer.update(grads, opt_state, params)
         return optax.apply_updates(params, updates), opt_state, loss
 
     print("Starting algorithm 1" )
@@ -73,14 +91,25 @@ def infer(key, model, params, sim, x_obs):
 
 if __name__ == "__main__":
     key = jax.random.PRNGKey(0)
-    lv = LotkaVolterra() 
+
+    lv = LotkaVolterra(
+        dt=config['sim']['dt'], 
+        sigma=config['sim']['sigma']
+    ) 
     proposal = lv_prior_predictive_proposal(lv, key) 
-    model = LocalScoreNet(d_teta=4)
+    model = LocalScoreNet(config=config['model'])
 
     # Alg 1
-    trained_params = train(key, model, lv, proposal) 
+    trained_params = train(key, model, lv, proposal, config['train'])
     
+    # Generate the Ground Truth data
+    key, subkey = jax.random.split(key)
+    theta_true = jnp.array([[0.6, 0.025, 0.8, 0.025]]) # theta
+    x0_true = jnp.array([[10.0, 5.0]])  # initial value
+
+    from src.simulators import lv_traj
+    x_obs_target = lv_traj(subkey, lv, theta_true, x0_true, T=20)
+
     # Alg 2
-    # TODO: generate ground truth data using generate trajectory --> x_obs_target
     samples = infer(key, model, trained_params, lv, x_obs_target)  # x_obs_target (T, 2)
     print(f"completed sampling from the posterior: {samples.shape}")

@@ -20,22 +20,32 @@ class GAUSSScoreFn:
         theta_a: noisy parameter (d_theta, )
         x_0_T: total observations
         """
+        print(f'x_0_T shape: {x_0_T.shape}')
         # make sure that the shape is  (B, ...)
-        if x_0_T.ndim == 2:
-            x_0_T = x_0_T[jnp.newaxis, ...]
+        if x_0_T.ndim != 3:
+            x_0_T = x_0_T.reshape(-1, x_0_T.shape[-2], x_0_T.shape[-1])
 
+        # elif x_0_T.ndim == 2:
+        #     x_0_T = x_0_T[jnp.newaxis, ...] # (B, T, d_x)
+        print(f'x_0_T shape after reshaping: {x_0_T.shape}')
         B, T, _ = x_0_T.shape
         num_transitions = T - 1
 
         # 1. calculate the local score (s_phi)
-        local_scores = self.score_net.apply(self.params, x_0_T, theta_a, a) # (B, T-1, d_theta)
-        local_scores = jnp.squeeze(local_scores, axis=0) # (T-1, d_theta)
+        theta_in = theta_a[jnp.newaxis, ...] if theta_a.ndim == 1 else theta_a # (B, d_tehta)
+        a_in = jnp.atleast_1d(a) # (B, )
+
+        local_scores = self.score_net.apply({'params': self.params}, x_0_T, theta_in, a_in) # (B, T-1, d_theta)
+        print(f'network output shape : {local_scores.shape}')
+        local_scores = jnp.squeeze(local_scores, axis=0) 
+        print(f'network output shape after reshaping : {local_scores.shape}')
+        # local_scores = local_scores[0] # (T-1, d_theta)
 
         # 2. Calculate the inverse covarainces
         # \Sigma_a^-1  --> precision of p(\theta | theta_a)
         sigma_a_inv = self.get_prior_precision(a) # (d_tehta, d_theta)
         # \Sigma_a,t,t+1^-1 --> precision of local posterior p(\theta | theta_a, x^t,t+1)
-        sigma_a_t_inv = self.estimate_local_precisions(a, theta_a, x_0_T) # (T-1, d_tehta, d_tehta)
+        sigma_a_t_inv = self.estimate_local_precision(a, theta_a, x_0_T) # (T-1, d_tehta, d_tehta)
         
         # 3. lambda_a = Sum (\simga_a,t,t+1 ^-1 + (1-T) \sigma_a^-1)
         lambda_a = jnp.sum(sigma_a_t_inv, axis=0) + (1 - num_transitions) * sigma_a_inv
@@ -57,6 +67,12 @@ class GAUSSScoreFn:
         global_score = jnp.linalg.solve(lambda_a, weighted_local_sum + weighted_prior_term)
 
         return global_score
+
+    def apply(self, others, x_0_T, theta_a, a):
+        """ to match the EulserMaruyama interface (reverse.py)"""
+        theta_val = jnp.squeeze(theta_a)
+        a_val = jnp.squeeze(a)
+        return self.__call__(a_val, theta_val, x_0_T)
     
 
     def get_prior_precision(self, a): ## TODO: how do i get this
@@ -77,7 +93,7 @@ class GAUSSScoreFn:
             samples = jax.vmap(lambda k: self.diffuser.sample(k, x_pair))(keys)
 
             cov = jnp.cov(samples, rowvar=False)
-            return jnp.lialg(cov + 1e-6 * jnp.eye(cov.shape[0]))
+            return jnp.linalg(cov + 1e-6 * jnp.eye(cov.shape[0]))
 
         return jax.vmap(single_transition_precision(x_pairs))
 

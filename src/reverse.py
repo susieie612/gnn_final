@@ -31,25 +31,31 @@ class EulerMaruyama: # initilize with score function and sde
         Args:
         state: current (theta, time)
         a_new: next time step value
-        x_pair: (x_t, x_t+1) 
+        x_pair: (x_t, x_t+1)  (shape: (2, d_x))
         """
 
-        theta = state.position
+        theta = state.position # (d_tehta)
         t = state.time 
         dt = a_new - t
 
         # to match the shape of LocalScoreNet (B, T, d_x)
-        x_in = x_pair[jnp.newaxis, jnp.newaxis, :]
-        theta_in = theta[jnp.newaxis, ...]
-        t_in = t[jnp.newaxis, ...]
-
+        x_in = x_pair[jnp.newaxis, ...] # (1,2,d_x)
+        theta_in = theta[jnp.newaxis, ...] # (1, d_theta)
+        # t_in = t[jnp.newaxis, ...] # (1,)
+        t_in = jnp.atleast_1d(t)             # (1,)
+        print(f't_in shape: {t_in.shape}')
         # calculate the local score
-        score = self.score_net.apply(self.params, x_in, theta_in, t_in)
-        score = jnp.squeeze(score)
+        score = self.score_net.apply(
+            {'params': self.params},
+            x_in, 
+            theta_in, 
+            t_in
+            )
+        # score = jnp.squeeze(score)
+        score = jnp.ravel(score)
 
         # Update with Euler-Maruyama
         g = self.sde.std(t) 
-
         drift = (g**2) * score * dt
         diffusion = g * jnp.sqrt(jnp.abs(dt)) * jax.random.normal(key, theta.shape)
 
@@ -76,12 +82,13 @@ class Diffuser:
         to be called inside estimate_local_precision of GAUSSScoreFn 
         """
         # initialize
-        sampling_grid = self.grid[self.grid <= a_start][::-1] # 
+        sampling_grid = self.time_grid[::-1]  # reverse the input time grid
 
         std_a = self.sde.std(a_start)
-        initial_position = std_a * jax.random.normal(key, self.theta_shape)
+        k_init, k_loop = jax.random.split(key)
+        initial_position = std_a * jax.random.normal(k_init, self.theta_shape)
 
-        # initalize the kernel
+        # initalize the kernel, which is Euler-Maruyama
         state = self.kernel.init(initial_position, x_pair, a_start)
 
         def body_fn(carry, a_new):
@@ -89,17 +96,22 @@ class Diffuser:
             k, sk = jax.random.split(k)
             
             # a step of reverse process
-            next_state = self.kernel.step(sk, current_state, a_new, x_pair)
+            next_state = jax.lax.cond(
+                a_new < a_start, # for case where a \= 1.0, then skip all time step that is larger than starting a
+                lambda s: self.kernel.step(sk, s, a_new, x_pair), # if a_new < a_start
+                lambda s: s._replace(time=a_new),  # if a_new > a_start, only update time
+                current_state
+            )
 
-            if self.transform_state is not None:
-                next_state = self.transform_state(next_state)
+            # if self.transform_state is not None:
+            #     next_state = self.transform_state(next_state)
             
             return (k, next_state), None
         
         # loop over entire reverse process
         (_, final_state), _ = jax.lax.scan(
             body_fn, 
-            (key, state), 
+            (k_loop, state), 
             sampling_grid[1:]
         )
 
