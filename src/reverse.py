@@ -13,7 +13,7 @@ class EulerMaruyama: # initilize with score function and sde
     def __init__(self, score_net, params, sde): 
         """
         Args:
-        score_net: LocalScoreNet
+        score_net: InferScoreNet, LocalScoreNet
         params: leearned network parameters
         sde: SDE
         """
@@ -31,28 +31,26 @@ class EulerMaruyama: # initilize with score function and sde
         Args:
         state: current (theta, time)
         a_new: next time step value
-        x_pair: (x_t, x_t+1)  (shape: (2, d_x))
+        x_pair: (x_1,t, x_1,t+1, x_2,t, x_2,t+1....)  (shape: (2 * d_x))
         """
 
         theta = state.position # (d_tehta)
         t = state.time 
         dt = a_new - t
 
-        # to match the shape of LocalScoreNet (B, T, d_x)
-        x_in = x_pair[jnp.newaxis, ...] # (1,2,d_x)
+        # to match the shape of LocalScoreNet (B, 2*d_x)
+        x_in = x_pair[jnp.newaxis, ...] # (1,2*d_x)
         theta_in = theta[jnp.newaxis, ...] # (1, d_theta)
-        # t_in = t[jnp.newaxis, ...] # (1,)
-        t_in = jnp.atleast_1d(t)             # (1,)
-        print(f't_in shape: {t_in.shape}')
-        # calculate the local score
-        score = self.score_net.apply(
+        a_in = jnp.atleast_1d(t) # (1,)
+        print(f'[Reverse, EulerMaruyama] x_in shape: {x_in.shape}')
+
+        score = self.score_net.apply( # trained ScoreMLP
             {'params': self.params},
             x_in, 
             theta_in, 
-            t_in
+            a_in
             )
-        # score = jnp.squeeze(score)
-        score = jnp.ravel(score)
+        score = jnp.squeeze(score, axis=0) # (d_theta, )
 
         # Update with Euler-Maruyama
         g = self.sde.std(t) 
@@ -81,6 +79,7 @@ class Diffuser:
         sample theta trhough the reverse process starting from a_start to 0
         to be called inside estimate_local_precision of GAUSSScoreFn 
         """
+        print(f"--- [REVERSE DEBUG] sample x_pair shape: {x_pair.shape} ---")
         # initialize
         sampling_grid = self.time_grid[::-1]  # reverse the input time grid
 
@@ -112,7 +111,7 @@ class Diffuser:
         (_, final_state), _ = jax.lax.scan(
             body_fn, 
             (k_loop, state), 
-            sampling_grid[1:]
+            sampling_grid
         )
 
         return final_state.position

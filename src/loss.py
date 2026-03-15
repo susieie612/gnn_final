@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 
 
-def denoising_score_matching_loss(params, score_net, key, theta, x_t, x_next, sde):
+def denoising_score_matching_loss(params, model, key, theta, x_train, sde):
     """
     Eq. 4 of the paper (Denoising score matching loss)
     """
@@ -13,24 +13,28 @@ def denoising_score_matching_loss(params, score_net, key, theta, x_t, x_next, sd
     # TODO: later could change the distribution of a to focus training on certain level of noise
     a = jax.random.uniform(k1, (theta.shape[0],), minval = sde.T_min, maxval = sde.T_max) 
 
-    # add perturbation for sampled noise level
+    # add the sampled noise to theta
     eps = jax.random.normal(k2, shape = theta.shape)
-    std_a = sde.std(a)[:, jnp.newaxis]
+    std_a = sde.std(a)[:, jnp.newaxis] # sde defined in main.py
     mean_a = sde.mean(a, theta)
     theta_perturbed = mean_a + std_a * eps
 
-    x_batch = jnp.stack([x_t, x_next], axis=1) # broadcasting for input to local_score_net
-
-    score_pred = score_net.apply(
+    # concatenate to pass all x pairs seperately parallel through the ScoreMLP
+    # x_input = jnp.concatenate([x_t, x_next], axis=-1) # (B, 2*d_x)
+    x_input = x_train.reshape(x_train.shape[0], -1)
+    
+    score_pred = model.apply( # ScoreMLP
         {'params': params},
-        x_batch, # ( (x_0, x_1), (x_1, x_2), ...)
-         theta_perturbed,
-         a
+         x_input, # (B, 2*d_x)
+         theta_perturbed, # (B, d_theta)
+         a[:, jnp.newaxis] # (B, 1)
          )
-    score_target = -eps / (std_a + 1e-8)
+
+    score_target = -eps / (std_a + 1e-8) # true noise vector
     score_target = score_target[:, jnp.newaxis, :]
 
     loss = jnp.mean(jnp.sum((score_pred - score_target)**2, axis=-1))
+
     return loss
 
 

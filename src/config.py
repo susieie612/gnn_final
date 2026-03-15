@@ -2,7 +2,7 @@
 config = {
     "model": {
         "hidden_dim": 128,
-        "d_teta": 4,
+        "d_theta": 4,
         "d_x": 2
     },
     "train": {

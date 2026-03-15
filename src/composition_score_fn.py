@@ -20,26 +20,22 @@ class GAUSSScoreFn:
         theta_a: noisy parameter (d_theta, )
         x_0_T: total observations
         """
-        print(f'x_0_T shape: {x_0_T.shape}')
-        # make sure that the shape is  (B, ...)
-        if x_0_T.ndim != 3:
-            x_0_T = x_0_T.reshape(-1, x_0_T.shape[-2], x_0_T.shape[-1])
+        print(f"[DEBUG START] a: {a}, a_shape: {getattr(a, 'shape', 'N/A')}")
+        print(f"[DEBUG START] theta_a shape: {theta_a.shape}")
+        print(f"[DEBUG START] x_0_T initial shape: {x_0_T.shape}")
 
-        # elif x_0_T.ndim == 2:
-        #     x_0_T = x_0_T[jnp.newaxis, ...] # (B, T, d_x)
-        print(f'x_0_T shape after reshaping: {x_0_T.shape}')
-        B, T, _ = x_0_T.shape
-        num_transitions = T - 1
+
+        if x_0_T.ndim != 3:
+            x_0_T = x_0_T[jnp.newaxis, ...] # add dim to create (1,T,d_x)
+        print(f"[DEBUG STEP 1] x_0_T reshaped: {x_0_T.shape}")
 
         # 1. calculate the local score (s_phi)
-        theta_in = theta_a[jnp.newaxis, ...] if theta_a.ndim == 1 else theta_a # (B, d_tehta)
-        a_in = jnp.atleast_1d(a) # (B, )
-
-        local_scores = self.score_net.apply({'params': self.params}, x_0_T, theta_in, a_in) # (B, T-1, d_theta)
-        print(f'network output shape : {local_scores.shape}')
-        local_scores = jnp.squeeze(local_scores, axis=0) 
+        local_scores = self.score_net.apply({'params': self.params}, x_0_T,  # (B, T-1, d_x)
+                                                theta_a[jnp.newaxis, ...], # (B, T-1, d_theta)
+                                                jnp.atleast_1d(a)) # (B, T-1, 1)
+        print(f"[DEBUG STEP 2] local_scores raw shape: {local_scores.shape}")
+        local_scores = jnp.squeeze(local_scores, axis=0)  # B = 1
         print(f'network output shape after reshaping : {local_scores.shape}')
-        # local_scores = local_scores[0] # (T-1, d_theta)
 
         # 2. Calculate the inverse covarainces
         # \Sigma_a^-1  --> precision of p(\theta | theta_a)
@@ -48,6 +44,7 @@ class GAUSSScoreFn:
         sigma_a_t_inv = self.estimate_local_precision(a, theta_a, x_0_T) # (T-1, d_tehta, d_tehta)
         
         # 3. lambda_a = Sum (\simga_a,t,t+1 ^-1 + (1-T) \sigma_a^-1)
+        num_transitions = local_scores.shape[0]
         lambda_a = jnp.sum(sigma_a_t_inv, axis=0) + (1 - num_transitions) * sigma_a_inv
         
         # makse sure lambda_a is positive dfinite using eigenvalue decomposition (appendix B. 3) for numerical stability
@@ -72,30 +69,34 @@ class GAUSSScoreFn:
         """ to match the EulserMaruyama interface (reverse.py)"""
         theta_val = jnp.squeeze(theta_a)
         a_val = jnp.squeeze(a)
-        return self.__call__(a_val, theta_val, x_0_T)
+
+        score = self.__call__(a_val, theta_val, x_0_T) 
+        return score[jnp.newaxis, ...]
     
 
     def get_prior_precision(self, a): ## TODO: how do i get this
-    
+        # d_theta = 4
         return jnp.eye(self.prior.dim) / ( self.sde.std(a)**2 )
     
     def estimate_local_precision(self, a, theta_a, x_0_T):
         """
         estimate the local posterior by sampling using the diffuser
+        x_0_T: array(1, T, d_x) 
         """
-        x_starts = x_0_T[0, :-1, :]
-        x_ends = x_0_T[0, 1:, :]
-        x_pairs = jnp.concatenate([x_starts, x_ends], axis=-1) # (num_transitions, d_x_pair)
+        x_single = jnp.squeeze(x_0_T, axis=0)
+        x_pairs = jnp.concatenate([x_single[:-1], x_single[1:]], axis=-1) # (T-1, 2*d_x)
 
-        def single_transition_precision(x_pair):
+        def single_transition_precision(x_pair, key):
             keys = jax.random.split(jax.random.PRNGKey(0), self.num_samples)
 
-            samples = jax.vmap(lambda k: self.diffuser.sample(k, x_pair))(keys)
+            samples = jax.vmap(lambda k: self.diffuser.sample(k, x_pair, a))(keys)
 
             cov = jnp.cov(samples, rowvar=False)
-            return jnp.linalg(cov + 1e-6 * jnp.eye(cov.shape[0]))
-
-        return jax.vmap(single_transition_precision(x_pairs))
+            return jnp.linalg.inv(cov + 1e-6 * jnp.eye(cov.shape[0]))
+        
+        # calculate precision for all steps
+        batch_keys = jax.random.split(jax.random.PRNGKey(42), x_pairs.shape[0])
+        return jax.vmap(single_transition_precision)(x_pairs, batch_keys)
 
 
 

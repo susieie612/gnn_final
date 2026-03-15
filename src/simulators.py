@@ -114,6 +114,9 @@ class LotkaVolterra:
         self.sigma = sigma
         self.dt = dt
         self.eps = eps
+        self.dim = 4
+        self.d_x = 2      # [x, y]
+        self.d_theta = 4  # [alpha, beta, delta, gamma]
         
     def transition(self, key, x_t, theta):
         alpha, beta, delta, gamma = theta.T
@@ -146,6 +149,8 @@ class SIR:
         self.sigma = sigma
         self.dt = dt
         self.eps = eps
+        self.d_x = 3      # [S, I, R]
+        self.d_theta = 2  # [beta, gamma]
 
     def transition(self, key, x_t, theta):
         beta, gamma = theta.T
@@ -233,6 +238,15 @@ def lv_prior_predictive_proposal(sim, key, n_steps=5000):
 def kf_proposal(sim):
     return lambda k, b: (k, sim.x0(k, b))
 
+# def lv_traj(key, sim, theta, x0, T):
+#     states = [x0]
+#     x = x0
+#     for _ in range(T):
+#         key, subkey = random.split(key)
+#         x = sim.transition(subkey, x, theta)
+#         states.append(x)
+#     return jnp.stack(states)
+
 def lv_traj(key, sim, theta, x0, T):
     states = [x0]
     x = x0
@@ -240,4 +254,5 @@ def lv_traj(key, sim, theta, x0, T):
         key, subkey = random.split(key)
         x = sim.transition(subkey, x, theta)
         states.append(x)
-    return jnp.stack(states)
+    
+    return jnp.stack(states).squeeze(axis=1)
