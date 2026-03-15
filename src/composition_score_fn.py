@@ -20,22 +20,22 @@ class GAUSSScoreFn:
         theta_a: noisy parameter (d_theta, )
         x_0_T: total observations
         """
-        print(f"[DEBUG START] a: {a}, a_shape: {getattr(a, 'shape', 'N/A')}")
-        print(f"[DEBUG START] theta_a shape: {theta_a.shape}")
-        print(f"[DEBUG START] x_0_T initial shape: {x_0_T.shape}")
+        # print(f"[DEBUG START] a: {a}, a_shape: {getattr(a, 'shape', 'N/A')}")
+        # print(f"[DEBUG START] theta_a shape: {theta_a.shape}")
+        # print(f"[DEBUG START] x_0_T initial shape: {x_0_T.shape}")
 
 
         if x_0_T.ndim != 3:
             x_0_T = x_0_T[jnp.newaxis, ...] # add dim to create (1,T,d_x)
-        print(f"[DEBUG STEP 1] x_0_T reshaped: {x_0_T.shape}")
+        # print(f"[DEBUG STEP 1] x_0_T reshaped: {x_0_T.shape}")
 
         # 1. calculate the local score (s_phi)
         local_scores = self.score_net.apply({'params': self.params}, x_0_T,  # (B, T-1, d_x)
                                                 theta_a[jnp.newaxis, ...], # (B, T-1, d_theta)
                                                 jnp.atleast_1d(a)) # (B, T-1, 1)
-        print(f"[DEBUG STEP 2] local_scores raw shape: {local_scores.shape}")
+        # print(f"[DEBUG STEP 2] local_scores raw shape: {local_scores.shape}")
         local_scores = jnp.squeeze(local_scores, axis=0)  # B = 1
-        print(f'network output shape after reshaping : {local_scores.shape}')
+        # print(f'network output shape after reshaping : {local_scores.shape}')
 
         # 2. Calculate the inverse covarainces
         # \Sigma_a^-1  --> precision of p(\theta | theta_a)
@@ -50,6 +50,7 @@ class GAUSSScoreFn:
         # makse sure lambda_a is positive dfinite using eigenvalue decomposition (appendix B. 3) for numerical stability
         if ensure_pd is True:
             eps = 1e-5
+            lambda_a = (lambda_a + lambda_a.T) / 2.0 # ensure symmetry
             eigenvalues, eigenvectors = jnp.linalg.eigh(lambda_a)
             adjusted_ev = jnp.maximum(eigenvalues, eps)
             lambda_a = eigenvectors @ jnp.diag(adjusted_ev) @ eigenvectors.T 
@@ -76,7 +77,7 @@ class GAUSSScoreFn:
 
     def get_prior_precision(self, a): ## TODO: how do i get this
         # d_theta = 4
-        return jnp.eye(self.prior.dim) / ( self.sde.std(a)**2 )
+        return jnp.eye(self.prior.d_theta) / ( self.sde.std(a)**2 )
     
     def estimate_local_precision(self, a, theta_a, x_0_T):
         """
@@ -87,9 +88,9 @@ class GAUSSScoreFn:
         x_pairs = jnp.concatenate([x_single[:-1], x_single[1:]], axis=-1) # (T-1, 2*d_x)
 
         def single_transition_precision(x_pair, key):
-            keys = jax.random.split(jax.random.PRNGKey(0), self.num_samples)
-
-            samples = jax.vmap(lambda k: self.diffuser.sample(k, x_pair, a))(keys)
+            
+            keys = jax.random.split(key, self.num_samples)
+            samples = jax.vmap(lambda k: self.diffuser.sample_conditional(k, x_pair, a, theta_a))(keys)
 
             cov = jnp.cov(samples, rowvar=False)
             return jnp.linalg.inv(cov + 1e-6 * jnp.eye(cov.shape[0]))

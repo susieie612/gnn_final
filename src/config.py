@@ -8,7 +8,7 @@ config = {
     "train": {
         "learning_rate": 5e-4,
         "num_steps": 10000,
-        "batch_size": 128
+        "batch_size": 1
     },
     "sim": {
         "dt": 0.1,

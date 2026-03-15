@@ -36,13 +36,13 @@ class EulerMaruyama: # initilize with score function and sde
 
         theta = state.position # (d_tehta)
         t = state.time 
-        dt = a_new - t
+        dt = a_new - t # dt is negative
 
         # to match the shape of LocalScoreNet (B, 2*d_x)
         x_in = x_pair[jnp.newaxis, ...] # (1,2*d_x)
         theta_in = theta[jnp.newaxis, ...] # (1, d_theta)
         a_in = jnp.atleast_1d(t) # (1,)
-        print(f'[Reverse, EulerMaruyama] x_in shape: {x_in.shape}')
+        # print(f'[Reverse, EulerMaruyama] x_in shape: {x_in.shape}')
 
         score = self.score_net.apply( # trained ScoreMLP
             {'params': self.params},
@@ -51,12 +51,12 @@ class EulerMaruyama: # initilize with score function and sde
             a_in
             )
         score = jnp.squeeze(score, axis=0) # (d_theta, )
+        score = jnp.clip(score, -1e3, 1e3)
 
         # Update with Euler-Maruyama
-        g = self.sde.std(t) 
-        drift = (g**2) * score * dt
-        diffusion = g * jnp.sqrt(jnp.abs(dt)) * jax.random.normal(key, theta.shape)
-
+        beta_t = self.sde.beta_min + t * (self.sde.beta_max - self.sde.beta_min)
+        drift = (-0.5 * beta_t * theta - beta_t * score) * dt
+        diffusion = jnp.sqrt(beta_t) * jnp.sqrt(jnp.abs(dt)) * jax.random.normal(key, theta.shape)
         theta_next = theta + drift + diffusion
 
         return EMState(position=theta_next, time=a_new)
@@ -74,21 +74,21 @@ class Diffuser:
         self.transform_state = transform_state
 
     @partial(jax.jit, static_argnums=(0, ))
-    def sample(self, key, x_pair, a_start):
+    def sample_conditional(self, key, x_pair, a_start, init_pos):
         """
         sample theta trhough the reverse process starting from a_start to 0
         to be called inside estimate_local_precision of GAUSSScoreFn 
         """
-        print(f"--- [REVERSE DEBUG] sample x_pair shape: {x_pair.shape} ---")
+        # print(f"--- [REVERSE DEBUG] sample x_pair shape: {x_pair.shape} ---")
         # initialize
         sampling_grid = self.time_grid[::-1]  # reverse the input time grid
 
-        std_a = self.sde.std(a_start)
-        k_init, k_loop = jax.random.split(key)
-        initial_position = std_a * jax.random.normal(k_init, self.theta_shape)
+        # std_a = self.sde.std(a_start)
+        # k_init, k_loop = jax.random.split(key)
+        # initial_position = std_a * jax.random.normal(k_init, self.theta_shape)
 
         # initalize the kernel, which is Euler-Maruyama
-        state = self.kernel.init(initial_position, x_pair, a_start)
+        state = self.kernel.init(init_pos, x_pair, a_start)
 
         def body_fn(carry, a_new):
             k, current_state = carry
@@ -110,8 +110,16 @@ class Diffuser:
         # loop over entire reverse process
         (_, final_state), _ = jax.lax.scan(
             body_fn, 
-            (k_loop, state), 
+            (key, state), 
             sampling_grid
         )
 
         return final_state.position
+
+    @partial(jax.jit, static_argnums=(0, ))
+    def sample(self, key, x_pair, a_start):
+        """start from new noise for sampling"""
+        std_a = self.sde.std(a_start)
+        k_init, k_loop = jax.random.split(key)
+        initial_position = std_a * jax.random.normal(k_init, self.theta_shape)
+        return self.sample_conditional(k_loop, x_pair, a_start, initial_position)

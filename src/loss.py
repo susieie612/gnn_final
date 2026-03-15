@@ -33,7 +33,7 @@ def denoising_score_matching_loss(params, model, key, theta, x_train, sde):
     score_target = -eps / (std_a + 1e-8) # true noise vector
     score_target = score_target[:, jnp.newaxis, :]
 
-    loss = jnp.mean(jnp.sum((score_pred - score_target)**2, axis=-1))
+    loss = jnp.mean(jnp.sum((score_pred * std_a + eps)**2, axis=-1))
 
     return loss
 

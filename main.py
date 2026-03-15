@@ -38,7 +38,7 @@ def train(key, model, sim, proposal_fn, config):
     sde = SDE()
 
     # get values from config dictionary
-    lr = config.get('learning_rate', 5e-4)
+    lr = config.get('learning_rate', 1e-4)
     batch_size = config.get('batch_size', 128)
     optimizer = optax.adamw(learning_rate=lr) 
 
@@ -105,7 +105,7 @@ def infer(key, model, params, sim, x_obs):
     kernel = EulerMaruyama(gauss_fn, params, sde)
     final_sampler = Diffuser(kernel, grid, (4,), sde)
 
-    print(f"--- [INFER DEBUG] x_obs before vmap: {x_obs.shape} ---")
+    # print(f"--- [INFER DEBUG] x_obs before vmap: {x_obs.shape} ---")
 
     return final_sampler.sample(key, x_obs, 1.0)
 
@@ -136,14 +136,24 @@ def infer_many(key, model, params, sim, x_obs):
     kernel = EulerMaruyama(gauss_fn, params, sde)
     final_sampler = Diffuser(kernel, grid, (4,), sde)
 
-    print(f"--- [INFER DEBUG] x_obs before vmap: {x_obs.shape} ---")
+    num_samples = 10
+    chunk_size = 10
+    keys = jax.random.split(key, num_samples)
 
-    # 100개의 서로 다른 랜덤 키 생성
-    keys = jax.random.split(key, 100)
-    
-    # jax.vmap을 사용해 100개의 샘플을 병렬로 생성
-    # keys는 배치 축(0)으로 매핑하고, x_obs와 1.0(a_start)은 broadcast(None)
-    samples = jax.vmap(final_sampler.sample, in_axes=(0, None, None))(keys, x_obs, 1.0)
+    sample_chunk_fn = jax.jit(jax.vmap(final_sampler.sample, in_axes=(0, None, None)))
+
+    all_samples = []
+    print("Sampling started...")
+    for i in range(0, num_samples, chunk_size):
+        chunk_keys = keys[i : i + chunk_size]
+        
+        # chunk sampling
+        chunk_samples = sample_chunk_fn(chunk_keys, x_obs, 1.0)
+        all_samples.append(chunk_samples)
+        
+        print(f"[{i + chunk_size}/{num_samples}] samples processed...")
+        
+    samples = jnp.concatenate(all_samples, axis=0)
     
     return samples
 
@@ -170,12 +180,15 @@ if __name__ == "__main__":
     x0_true = jnp.array([[10.0, 5.0]])  # initial value
 
     from src.simulators import lv_traj
-    x_obs_target = lv_traj(key, lv, theta_true, x0_true, T=20)
-    print(f"--- [MAIN DEBUG] x_obs_target raw shape: {x_obs_target.shape} ---")
+    time_step = 5
+    x_obs_target = lv_traj(key, lv, theta_true, x0_true, T=time_step)
+    # print(f"--- [MAIN DEBUG] x_obs_target raw shape: {x_obs_target.shape} ---")
 
     # Alg 2
+    print('started sampling 10 samples with 20 time steps')
     samples = infer_many(key, model_inference, trained_params, lv, x_obs_target)  # x_obs_target (T, 2)
     print(f"completed sampling from the posterior: {samples.shape}")
 
-    plot_posterior_samples(samples, theta_true)
+    print('started visualizing')
+    plot_posterior_samples(samples, theta_true, save_path="plots/posterior_result.png")
 

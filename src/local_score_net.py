@@ -36,7 +36,7 @@ class LocalScoreNet(nn.Module):
     config: dict
 
     def setup(self):
-        # 실제 모든 연산을 수행하는 엔진
+    
         self.mlp = ScoreMLP(
             h_dim=self.config['hidden_dim'], 
             d_theta=self.config['d_theta']
@@ -47,17 +47,17 @@ class LocalScoreNet(nn.Module):
         """
         입력 x_t를 (N, 2 * d_x)로 변환하여 MLP에 전달
         """
-        # 1. 시계열 데이터(B, T, d_x)가 들어온 경우 (추론 시)
+        # for inference
         if x_t.ndim == 3:
             B, T, d_x = x_t.shape
-            # 전이 쌍 생성 (B, T-1, 2*d_x) [cite: 86, 126]
+            # transition paris
             x_input = jnp.concatenate([x_t[:, :-1, :], x_t[:, 1:, :]], axis=-1)
             
-            # theta와 a를 (B, T-1, dim)으로 확장 [cite: 110, 131]
+            # broadcast theta & a
             theta_ext = jnp.tile(theta[:, jnp.newaxis, :], (1, T-1, 1))
             a_ext = jnp.tile(a.reshape(B, 1, -1), (1, T-1, 1))
             
-            # (B * (T-1), 2 * d_x)로 펼쳐서 MLP 입력
+            # (B * (T-1), 2 * d_x)
             out = self.mlp(
                 x_input.reshape(-1, 2 * d_x), 
                 theta_ext.reshape(-1, theta.shape[-1]), 
@@ -65,11 +65,9 @@ class LocalScoreNet(nn.Module):
             )
             return out.reshape(B, T-1, -1)
 
-        # 2. 이미 쌍으로 묶인 (B, 2, d_x) 또는 (B, 2*d_x)가 들어온 경우 (학습/로컬 샘플링 시)
+        # for training
         else:
-            # 무조건 (Batch, 2 * d_x)로 강제 변환
             x_input = x_t.reshape(x_t.shape[0], -1) 
-            # a의 차원 보정 (B, 1)
             a_input = a.reshape(x_t.shape[0], -1)
             return self.mlp(x_input, theta, a_input)
 
