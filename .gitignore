@@ -5,7 +5,7 @@ venv/
 env/
 .env/
 
-data/
+# plots/
 checkpoints/
 *.npy
 *.pt

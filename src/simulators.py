@@ -230,7 +230,7 @@ class KolmogorovFlow:
 
 def lv_prior_predictive_proposal(sim, key, n_steps=5000):
     theta_key, x0_key, sim_key = random.split(key, 3)
-    theta = sim.prior_sampler(theta_key, 1)
+    theta = sim.prior(theta_key, 1)
     x = random.uniform(x0_key, (1, 2), minval=0.0, maxval=10.0)
     
     states = []

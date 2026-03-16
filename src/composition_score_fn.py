@@ -109,8 +109,15 @@ class GAUSSScoreFn:
         return score[jnp.newaxis, ...] # (1, d_theta) 
     
 
-    def get_prior_precision(self, a): ## TODO: how do i get this
-        return jnp.eye(self.prior.d_theta) / ( self.sde.std(a)**2 )
+    def get_prior_precision(self, a): ## TODO: check section 3.3
+        # return jnp.eye(self.prior.d_theta) / ( self.sde.std(a)**2 )
+        var_theta = 3.0 
+        s_a = self.sde.mean_coeff(a)
+        sigma_a = self.sde.std(a)
+        
+        # Sigma_a_inv = 1/Var(theta) + (s_a^2 / sigma_a^2)
+        precision = (1.0 / var_theta) + (s_a**2 / (sigma_a**2 + 1e-8))
+        return jnp.eye(self.prior.d_theta) * precision
     
     def estimate_local_precision(self, a, theta_a, x_0_T):
         """
