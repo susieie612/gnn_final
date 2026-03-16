@@ -53,6 +53,20 @@ class EulerMaruyama: # initilize with score function and sde
         score = jnp.squeeze(score, axis=0) # (d_theta, )
         score = jnp.clip(score, -1e3, 1e3)
 
+        # # noise prediction version
+        # noise_pred = self.score_net.apply(
+        #     {'params': self.params},
+        #     x_in, 
+        #     theta_in, 
+        #     a_in
+        #     )
+        # noise_pred = jnp.squeeze(noise_pred, axis=0)
+        
+        # # transfer noise into score 
+        # std_t = self.sde.std(t)
+        # score = -noise_pred / (std_t + 1e-8)
+        # score = jnp.clip(score, -1e3, 1e3)
+
         # Update with Euler-Maruyama
         beta_t = self.sde.beta_min + t * (self.sde.beta_max - self.sde.beta_min)
         drift = (-0.5 * beta_t * theta - beta_t * score) * dt

@@ -20,22 +20,36 @@ class GAUSSScoreFn:
         theta_a: noisy parameter (d_theta, )
         x_0_T: total observations
         """
-        # print(f"[DEBUG START] a: {a}, a_shape: {getattr(a, 'shape', 'N/A')}")
-        # print(f"[DEBUG START] theta_a shape: {theta_a.shape}")
-        # print(f"[DEBUG START] x_0_T initial shape: {x_0_T.shape}")
-
 
         if x_0_T.ndim != 3:
             x_0_T = x_0_T[jnp.newaxis, ...] # add dim to create (1,T,d_x)
-        # print(f"[DEBUG STEP 1] x_0_T reshaped: {x_0_T.shape}")
+
+        # to match the network input shape (T-1, 2*d_x)
+        x_pairs = jnp.concatenate([x_0_T[:, :-1, :], x_0_T[:, 1:, :]], axis=-1)
+        x_pairs = jnp.squeeze(x_pairs, axis=0) # (T-1, 2*d_x)
+        num_transitions = x_pairs.shape[0]
+
+        # Broadcast tehta_a and a
+        theta_a_batch = jnp.repeat(theta_a[jnp.newaxis, ...], num_transitions, axis=0) # (T-1, d_theta)
+        a_batch = jnp.repeat(jnp.atleast_1d(a)[jnp.newaxis, ...], num_transitions, axis=0) # (T-1, 1)
 
         # 1. calculate the local score (s_phi)
-        local_scores = self.score_net.apply({'params': self.params}, x_0_T,  # (B, T-1, d_x)
-                                                theta_a[jnp.newaxis, ...], # (B, T-1, d_theta)
-                                                jnp.atleast_1d(a)) # (B, T-1, 1)
-        # print(f"[DEBUG STEP 2] local_scores raw shape: {local_scores.shape}")
-        local_scores = jnp.squeeze(local_scores, axis=0)  # B = 1
-        # print(f'network output shape after reshaping : {local_scores.shape}')
+        local_scores = self.score_net.apply({'params': self.params}, 
+                                                x_pairs,  # ( T-1, 2 * d_x)
+                                                theta_a_batch, # (T-1, d_theta)
+                                                a_batch
+                                                ) # ( T-1, d_theta)
+        # local_scores = jnp.squeeze(local_scores, axis=0)  # B = 1
+
+        # noise version
+        # noise_pred = self.score_net.apply({'params': self.params}, x_0_T,
+        #                                         theta_a[jnp.newaxis, ...],
+        #                                         jnp.atleast_1d(a))
+        # noise_pred = jnp.squeeze(noise_pred, axis=0)
+
+        # std_a = self.sde.std(a)
+        # local_scores = -noise_pred / (std_a + 1e-8)
+
 
         # 2. Calculate the inverse covarainces
         # \Sigma_a^-1  --> precision of p(\theta | theta_a)
@@ -43,40 +57,59 @@ class GAUSSScoreFn:
         # \Sigma_a,t,t+1^-1 --> precision of local posterior p(\theta | theta_a, x^t,t+1)
         sigma_a_t_inv = self.estimate_local_precision(a, theta_a, x_0_T) # (T-1, d_tehta, d_tehta)
         
-        # 3. lambda_a = Sum (\simga_a,t,t+1 ^-1 + (1-T) \sigma_a^-1)
-        num_transitions = local_scores.shape[0]
+
+        # 3. lambda_a = Sum (\simga_a,t,t+1 ^-1 + (1-T) \sigma_a^-1
         lambda_a = jnp.sum(sigma_a_t_inv, axis=0) + (1 - num_transitions) * sigma_a_inv
         
-        # makse sure lambda_a is positive dfinite using eigenvalue decomposition (appendix B. 3) for numerical stability
+        # ensure lambda_a positive definiteness 
+        # using eigenvalue decomposition (appendix B. 3)
         if ensure_pd is True:
-            eps = 1e-5
+            eps = 1e-3
             lambda_a = (lambda_a + lambda_a.T) / 2.0 # ensure symmetry
             eigenvalues, eigenvectors = jnp.linalg.eigh(lambda_a)
-            adjusted_ev = jnp.maximum(eigenvalues, eps)
-            lambda_a = eigenvectors @ jnp.diag(adjusted_ev) @ eigenvectors.T 
+
+            # identify negative eigenvalues
+            min_eig = jnp.minimum(eigenvalues, 0.0)
+            lambda_minus = - (eigenvectors @ jnp.diag(min_eig) @ eigenvectors.T )
+            
+            adjustment = (lambda_minus / num_transitions) + eps * jnp.eye(lambda_a.shape[0])
+            sigma_a_t_inv = sigma_a_t_inv + adjustment[jnp.newaxis, ...]
+
+            lambda_a = jnp.sum(sigma_a_t_inv, axis=0) + (1 - num_transitions) * sigma_a_inv
+            lambda_a = (lambda_a + lambda_a.T) / 2
+ 
 
         # 4. compose global score
         # 1st term
         weighted_local_sum = jnp.sum(jax.vmap(lambda prec, score: prec @ score)(sigma_a_t_inv, local_scores), axis=0)
         # 2nd term
         prior_score = self.marginal_prior_fn(a, jnp.squeeze(theta_a)) # p(theta_a)
+        prior_score = jnp.atleast_1d(prior_score) # for simulations with scalar prior 
+
         weighted_prior_term = (1 - num_transitions) * (sigma_a_inv @ prior_score)
 
-        global_score = jnp.linalg.solve(lambda_a, weighted_local_sum + weighted_prior_term)
+        safe_lambda_a = lambda_a + 1e-6 * jnp.eye(lambda_a.shape[0])
+        global_score = jnp.linalg.solve(safe_lambda_a, weighted_local_sum + weighted_prior_term)
+
+        global_score = jnp.clip(global_score, -1e4, 1e4)
 
         return global_score
 
     def apply(self, others, x_0_T, theta_a, a):
         """ to match the EulserMaruyama interface (reverse.py)"""
-        theta_val = jnp.squeeze(theta_a)
-        a_val = jnp.squeeze(a)
+        # theta_val = jnp.squeeze(theta_a)
+        # a_val = jnp.squeeze(a)
 
-        score = self.__call__(a_val, theta_val, x_0_T) 
-        return score[jnp.newaxis, ...]
+        # score = self.__call__(a_val, theta_val, x_0_T) 
+        # return score[jnp.newaxis, ...]
+        theta_val = jnp.atleast_1d(jnp.squeeze(theta_a))
+        a_val = jnp.atleast_1d(jnp.squeeze(a))
+
+        score = self.__call__(a_val[0], theta_val, x_0_T) 
+        return score[jnp.newaxis, ...] # (1, d_theta) 
     
 
     def get_prior_precision(self, a): ## TODO: how do i get this
-        # d_theta = 4
         return jnp.eye(self.prior.d_theta) / ( self.sde.std(a)**2 )
     
     def estimate_local_precision(self, a, theta_a, x_0_T):
@@ -92,8 +125,9 @@ class GAUSSScoreFn:
             keys = jax.random.split(key, self.num_samples)
             samples = jax.vmap(lambda k: self.diffuser.sample_conditional(k, x_pair, a, theta_a))(keys)
 
-            cov = jnp.cov(samples, rowvar=False)
-            return jnp.linalg.inv(cov + 1e-6 * jnp.eye(cov.shape[0]))
+            cov = jnp.atleast_2d(jnp.cov(samples, rowvar=False))
+
+            return jnp.linalg.inv(cov + 1e-6 * jnp.eye(cov.shape[0])) # Tikhonov regularization
         
         # calculate precision for all steps
         batch_keys = jax.random.split(jax.random.PRNGKey(42), x_pairs.shape[0])

@@ -8,7 +8,7 @@ from src.reverse import Diffuser, EulerMaruyama
 from src.composition_score_fn import GAUSSScoreFn
 from src.config import config
 from src.visualise import plot_posterior_samples
-
+import src.simulators as sims
 
 class SDE:
     def __init__(self, beta_min=0.1, beta_max=20.0):
@@ -27,7 +27,7 @@ class SDE:
     def std(self, t):
         log_mean_coeff = -0.25 * t**2 * (self.beta_max - self.beta_min) - 0.5 * t * self.beta_min
         var = 1.0 - jnp.exp(2.0 * log_mean_coeff)
-        return jnp.sqrt(jnp.maximum(var, 1e-10)) # clip the variance
+        return jnp.sqrt(jnp.maximum(var, 1e-5)) # clip the variance
 
 def marginal_prior_score(a, theta, sde):
     # Denoising prior score p(theta_a)
@@ -46,7 +46,7 @@ def train(key, model, sim, proposal_fn, config):
     d_theta = sim.d_theta
     
     # TODO: later update 2nd dim to match for general simulations
-    init_x = jnp.ones((1, 2, sim.d_x)) 
+    init_x = jnp.ones((1, 2 * sim.d_x)) 
     init_theta = jnp.ones((1, sim.d_theta))
     init_a = jnp.ones((1,))
 
@@ -65,17 +65,18 @@ def train(key, model, sim, proposal_fn, config):
         return optax.apply_updates(params, updates), opt_state, loss
 
     print("Starting algorithm 1" )
-    for i in range(10000):
+    for i in range(5000):
         key, k_theta, k_prop, k_sim = jax.random.split(key, 4)
         
         # theta sampling from prior distribution
-        theta = sim.prior_sampler(k_theta, batch_size)
+        theta_sim = sim.prior(k_theta, batch_size)
+
         # sample x_t from proposal distribution p(x_t)
         _, x_t = proposal_fn(k_prop, batch_size)
         # do 1-step transition to get x_next
-        x_next = sim.transition(k_sim, x_t, theta) # (B, d_x)
+        x_next = sim.transition(k_sim, x_t, theta_sim) # (B, d_x)
 
-        params, opt_state, loss = step(params, opt_state, key, theta, x_t, x_next)
+        params, opt_state, loss = step(params, opt_state, key, theta_sim, x_t, x_next)
         
         if i % 1000 == 0: 
             print(f"Step {i}, Loss: {loss:.4f}")
@@ -134,7 +135,7 @@ def infer_many(key, model, params, sim, x_obs):
 
     # sample from final model
     kernel = EulerMaruyama(gauss_fn, params, sde)
-    final_sampler = Diffuser(kernel, grid, (4,), sde)
+    final_sampler = Diffuser(kernel, grid, (sim.d_theta,), sde)
 
     num_samples = 10
     chunk_size = 10
@@ -157,38 +158,100 @@ def infer_many(key, model, params, sim, x_obs):
     
     return samples
 
+
+def get_simulator(key, sim_name, sim_params):
+    sim_class = getattr(sims, sim_name)
+    sim_instance = sim_class(**sim_params)
+
+    if sim_name == "LotkaVolterra":
+        proposal_fn = sims.lv_prior_preddictive_proposal(sim_instance, key)
+    elif sim_name == "KolmogorovFlow":
+        proposal_fn = sims.kf_proposal(sim_instance)
+    else: 
+        proposal_fn = sim_instance.proposal
+
+    return sim_instance, proposal_fn
+
+
+
 if __name__ == "__main__":
     key = jax.random.PRNGKey(0)
+    sim_cfg = config['sim']
 
-    # generate simulations
-    lv = LotkaVolterra(
-        dt=config['sim']['dt'], 
-        sigma=config['sim']['sigma']
-    ) 
-    proposal = lv_prior_predictive_proposal(lv, key) 
-    
-    # LocalScoreNet: (B, T, d_x) -> (B, T-1, d_theta)
-    model_inference = LocalScoreNet(config=config['model'])
-    # # ScoreMLP: (B, 2*d_x) -> (B, d_theta)
-    # model_engine = ScoreMLP(h_dim=config['model']['hidden_dim'], d_theta=config['model']['d_theta'])
-    
-    # Alg 1
-    trained_params = train(key, model_inference, lv, proposal, config['train'])
-    
-    # Generate the Ground Truth data
-    theta_true = jnp.array([[0.6, 0.025, 0.8, 0.025]]) # theta
-    x0_true = jnp.array([[10.0, 5.0]])  # initial value
+    # # generate simulations
+    # lv = LotkaVolterra(
+    #     dt=config['sim']['dt'], 
+    #     sigma=config['sim']['sigma']
+    # ) 
+    # proposal = lv_prior_predictive_proposal(lv, key) 
+
+    # # LocalScoreNet: (B, T, d_x) -> (B, T-1, d_theta)
+    # model_inference = LocalScoreNet(config=config['model'])
+
+    # # Alg 1
+    # trained_params = train(key, model_inference, lv, proposal, config['train'])
+
+    #     # Generate the Ground Truth data
+    # theta_true = jnp.array([[0.6, 0.025, 0.8, 0.025]]) # theta
+    # x0_true = jnp.array([[10.0, 5.0]])  # initial value
+
+    ## generate trajectory
+    # from src.simulators import lv_traj
+    # time_step = 5
+    # x_obs_target = lv_traj(key, lv, theta_true, x0_true, T=time_step)
+
+    # # Alg 2
+    # print('started sampling 10 samples with 20 time steps')
+    # samples_raw = infer_many(key, model_inference, trained_params, lv, x_obs_target)  # x_obs_target (T, 2)
+    # samples = jnp.exp(samples_raw)
+    # print(f"completed sampling from the posterior: {samples.shape}")
+
+    # print('started visualizing')
+    # plot_posterior_samples(samples, theta_true, save_path="plots/posterior_result.png")
+
+
+
+    # load simulator
+    active_sim_name = config['active_sim']
+    sim_cfg = config['sim_settings'][active_sim_name]
+
+    sim, proposal = get_simulator(
+        key,
+        sim_cfg['name'],
+        sim_cfg['params']
+    )
+
+    model_config = config['model'].copy()
+    model_config['d_theta'] = sim.d_theta
+    model_config['d_x'] = sim.d_x
+
+    model_inference = LocalScoreNet(
+        config=model_config
+        # hidden_dim = config['model']['hidden_dim'],
+        # d_theta = sim.d_theta,
+        # d_x = sim.d_x
+    )
+
+    # training (Alg 1)
+    trained_params = train(key, model_inference, sim, proposal, config['train'])
+
+    # generate ground truth
+    target_cfg = sim_cfg['target']
+    theta_true = jnp.array([target_cfg['theta_true']])
+
+    if target_cfg["x0_true"] is not None:
+        x0_true = jnp.array([target_cfg["x0_true"]])
+    else:
+        _, x0_true = sim.x0(key, 1)
+
+    # generate trajectory
+    time_step = target_cfg["time_steps"] 
 
     from src.simulators import lv_traj
-    time_step = 5
-    x_obs_target = lv_traj(key, lv, theta_true, x0_true, T=time_step)
-    # print(f"--- [MAIN DEBUG] x_obs_target raw shape: {x_obs_target.shape} ---")
+    x_obs_target = lv_traj(key, sim, theta_true, x0_true, T=time_step) # TODO: may need to treat KolmogorovFlow differently
 
-    # Alg 2
-    print('started sampling 10 samples with 20 time steps')
-    samples = infer_many(key, model_inference, trained_params, lv, x_obs_target)  # x_obs_target (T, 2)
-    print(f"completed sampling from the posterior: {samples.shape}")
+    # inference (Alg 2)
+    print(f"--- Inference for {active_sim_name} with {time_step} time steps ---")
+    samples_raw = infer_many(key, model_inference, trained_params, sim, x_obs_target)
 
-    print('started visualizing')
-    plot_posterior_samples(samples, theta_true, save_path="plots/posterior_result.png")
-
+    plot_posterior_samples(samples_raw, theta_true, save_path=f"plots/{active_sim_name}_{time_step}_results.png")

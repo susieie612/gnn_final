@@ -8,6 +8,8 @@ class GaussianRandomWalk:
         self.dim = dim 
         self.alpha = alpha 
         self.sigma = sigma 
+        self.d_x = dim      
+        self.d_theta = dim
         
     def prior(self, key, batch): 
         return random.uniform(key, (batch, self.dim), minval=-3.0, maxval=3.0) 
@@ -24,6 +26,8 @@ class MixtureRandomWalk:
     def __init__(self, dim=5, sigma=1.0):
         self.dim = dim
         self.sigma = sigma
+        self.d_x = dim      
+        self.d_theta = dim
         
     def prior(self, key, batch): 
         return random.uniform(key, (batch, self.dim), minval=-3.0, maxval=3.0) 
@@ -42,7 +46,8 @@ class PeriodicSDE:
     def __init__(self, dt=0.05, sigma=0.5):
         self.dt = dt
         self.sigma = sigma
-        self.dim = 2
+        self.d_x = 2
+        self.d_theta = 2
     
     def prior(self, key, batch):
         return random.uniform(key, (batch, 1), minval=-3.0, maxval=3.0)
@@ -64,8 +69,8 @@ class PeriodicSDE:
 class LinearSDE:
     def __init__(self, dt=0.05, dim=3, theta_dim=18):
         self.dt = dt
-        self.dim = dim
-        self.theta_dim = theta_dim
+        self.d_x = dim
+        self.d_theta = theta_dim
         
     def prior(self, key, batch):
         return random.uniform(key, (batch, self.theta_dim), minval=-1.0, maxval=1.0)
@@ -90,7 +95,8 @@ class DoubleWellSDE:
     def __init__(self, dt=0.01, sigma=0.5, dim=1):
         self.dt = dt
         self.sigma = sigma
-        self.dim = dim
+        self.d_x = 4
+        self.d_theta = 2
     
     def prior(self, key, batch):
         k1, k2 = random.split(key)
@@ -114,7 +120,6 @@ class LotkaVolterra:
         self.sigma = sigma
         self.dt = dt
         self.eps = eps
-        self.dim = 4
         self.d_x = 2      # [x, y]
         self.d_theta = 4  # [alpha, beta, delta, gamma]
         
@@ -135,11 +140,11 @@ class LotkaVolterra:
         
         return jnp.stack([jnp.maximum(x_next, self.eps), jnp.maximum(y_next, self.eps)], axis=1)
     
-    def prior_sampler(self, key, batch):
+    def prior(self, key, batch):
         raw = random.normal(key, (batch, 4))
         return jnp.exp(raw)
 
-    def uniform_proposal(self, key, batch):
+    def proposal(self, key, batch):
         key, subkey = random.split(key)
         x = random.uniform(subkey, (batch, 2), minval=0.0, maxval=10.0)
         return key, x
@@ -171,11 +176,11 @@ class SIR:
         
         return jnp.stack([jnp.maximum(v, self.eps) for v in [S_next, I_next, R_next]], axis=1)
 
-    def prior_sampler(self, key, batch):
+    def prior(self, key, batch):
         x = random.normal(key, (batch, 2))
         return jnp.exp(x)
 
-    def uniform_proposal(self, key, batch):
+    def proposal(self, key, batch):
         key, subkey = random.split(key)
         S = random.uniform(subkey, (batch,), minval=0.5, maxval=1.0)
         I = random.uniform(subkey, (batch,), minval=0.0, maxval=0.5)
@@ -193,6 +198,8 @@ class KolmogorovFlow:
         self.k2 = self.k2.at[0, 0].set(1.0)
         y = jnp.linspace(0, L, N)
         self.forcing_pattern = jnp.sin(y)[None, :].repeat(N, axis=0)
+        self.d_x = 4096
+        self.d_theta = 2
         
     def prior(self, key, batch):
         key1, key2 = random.split(key)

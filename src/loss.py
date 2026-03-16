@@ -29,11 +29,20 @@ def denoising_score_matching_loss(params, model, key, theta, x_train, sde):
          theta_perturbed, # (B, d_theta)
          a[:, jnp.newaxis] # (B, 1)
          )
-
-    score_target = -eps / (std_a + 1e-8) # true noise vector
-    score_target = score_target[:, jnp.newaxis, :]
-
+    
     loss = jnp.mean(jnp.sum((score_pred * std_a + eps)**2, axis=-1))
+
+
+    ## learn noise(eps) itself
+    # noise_pred = model.apply(
+    #     {'params': params},
+    #      x_input, 
+    #      theta_perturbed, 
+    #      a[:, jnp.newaxis] 
+    #      )
+
+    # ## MSE Loss
+    # loss = jnp.mean(jnp.sum((noise_pred - eps)**2, axis=-1))
 
     return loss
 
