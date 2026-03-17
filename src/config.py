@@ -31,7 +31,7 @@ config = {
         "PeriodicSDE": { ## currently not working
             "name": "PeriodicSDE",
             "params": {"dt": 0.05, "sigma": 0.5},
-            "target": {"theta_true": [2.0, 0.0], "x0_true": [1.0, 0.0], "time_steps": 30}
+            "target": {"theta_true": [2.0, 0.0], "x0_true": [1.0, 0.0], "time_steps": 5}
         },
         "LinearSDE": {
             "name": "LinearSDE",
@@ -45,7 +45,7 @@ config = {
         "DoubleWellSDE": {
             "name": "DoubleWellSDE",
             "params": {"dt": 0.01, "sigma": 0.5, "dim": 1},
-            "target": {"theta_true": [1.0, -0.5], "x0_true": [0.1], "time_steps": 50}
+            "target": {"theta_true": [1.0, -0.5], "x0_true": [0.1], "time_steps": 5}
         },
         "LotkaVolterra": {
             "name": "LotkaVolterra",

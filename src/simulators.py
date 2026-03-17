@@ -145,7 +145,7 @@ class LotkaVolterra:
     
     def prior(self, key, batch):
         raw = random.normal(key, (batch, 4))
-        return jnp.exp(raw)
+        return raw # jnp.exp(raw)
 
     def proposal(self, key, batch):
         key, subkey = random.split(key)
@@ -181,7 +181,7 @@ class SIR:
 
     def prior(self, key, batch):
         x = random.normal(key, (batch, 2))
-        return jnp.exp(x)
+        return x #jnp.exp(x)
 
     def proposal(self, key, batch):
         key, subkey = random.split(key)
@@ -233,7 +233,9 @@ class KolmogorovFlow:
 
 def lv_prior_predictive_proposal(sim, key, n_steps=5000):
     theta_key, x0_key, sim_key = random.split(key, 3)
-    theta = sim.prior(theta_key, 1)
+    theta_raw = sim.prior(theta_key, 1)
+    theta = jnp.exp(theta_raw)
+    
     x = random.uniform(x0_key, (1, 2), minval=0.0, maxval=10.0)
     
     states = []

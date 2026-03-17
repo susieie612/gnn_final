@@ -78,14 +78,19 @@ def train(key, model, sim, proposal_fn, config):
         key, k_theta, k_prop, k_sim = jax.random.split(key, 4)
         
         # theta sampling from prior distribution
-        theta_sim = sim.prior(k_theta, batch_size)
+        theta_raw = sim.prior(k_theta, batch_size)
+
+        if active_sim_name in ["LotkaVolterra", "SIR"]:
+            theta_sim = jnp.exp(theta_raw)
+        else:
+            theta_sim = theta_raw
 
         # sample x_t from proposal distribution p(x_t)
         _, x_t = proposal_fn(k_prop, batch_size)
         # do 1-step transition to get x_next
         x_next = sim.transition(k_sim, x_t, theta_sim) # (B, d_x)
 
-        params, opt_state, loss = step(params, opt_state, key, theta_sim, x_t, x_next)
+        params, opt_state, loss = step(params, opt_state, key, theta_raw, x_t, x_next)
         
         if i % 1000 == 0: 
             print(f"Step {i}, Loss: {loss:.4f}")
@@ -234,8 +239,11 @@ if __name__ == "__main__":
     # inference (Alg 2)
     print(f"--- Inference for {active_sim_name} with {time_step} time steps ---")
     samples_raw, final_sampler = infer_many(key, model_inference, trained_params, sim, x_obs_target)
+    if active_sim_name in ["LotkaVolterra", "SIR"]:
+        samples_raw = jnp.clip(samples_raw, a_min=-15.0, a_max=5.0)
+        samples_raw = jnp.exp(samples_raw)
     
-    if active_sim_name == "LotkaVolterra":
+    if active_sim_name in ["LotkaVolterra", "SIR"]:
         samples_raw = jnp.exp(samples_raw)
 
     # add visulaization tools here

@@ -51,7 +51,7 @@ class EulerMaruyama: # initilize with score function and sde
             a_in
             )
         score = jnp.squeeze(score, axis=0) # (d_theta, )
-        score = jnp.clip(score, -1e3, 1e3)
+        score = jnp.clip(score, -50, 50)
 
         # # noise prediction version
         # noise_pred = self.score_net.apply(
