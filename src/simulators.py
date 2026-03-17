@@ -46,6 +46,7 @@ class PeriodicSDE:
     def __init__(self, dt=0.05, sigma=0.5):
         self.dt = dt
         self.sigma = sigma
+        self.dim = dim
         self.d_x = 2
         self.d_theta = 2
     
@@ -69,6 +70,7 @@ class PeriodicSDE:
 class LinearSDE:
     def __init__(self, dt=0.05, dim=3, theta_dim=18):
         self.dt = dt
+        self.dim = dim
         self.d_x = dim
         self.d_theta = theta_dim
         
@@ -97,6 +99,7 @@ class DoubleWellSDE:
         self.sigma = sigma
         self.d_x = 4
         self.d_theta = 2
+        self.dim = dim
     
     def prior(self, key, batch):
         k1, k2 = random.split(key)

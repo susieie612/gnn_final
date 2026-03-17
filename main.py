@@ -95,7 +95,8 @@ def train(key, model, sim, proposal_fn, config):
 # ALGORITHM 2: compose for noise injected time series
 def infer(key, model, params, sim, x_obs):
     sde = SDE()
-    grid = jnp.linspace(1e-3, 1.0, 100) 
+    # grid = jnp.linspace(1e-3, 1.0, 100) 
+    grid = jnp.geompace(1e-2, 1.0, 100)  # for numerical stability near a=0
     
     # 1. Create a local sampler for precision estimation    
     local_kernel = EulerMaruyama(model, params, sde)

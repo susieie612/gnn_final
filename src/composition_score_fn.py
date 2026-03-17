@@ -91,7 +91,7 @@ class GAUSSScoreFn:
         safe_lambda_a = lambda_a + 1e-6 * jnp.eye(lambda_a.shape[0])
         global_score = jnp.linalg.solve(safe_lambda_a, weighted_local_sum + weighted_prior_term)
 
-        global_score = jnp.clip(global_score, -1e4, 1e4)
+        global_score = jnp.clip(global_score, -100, 100)
 
         return global_score
 
@@ -116,7 +116,7 @@ class GAUSSScoreFn:
         sigma_a = self.sde.std(a)
         
         # Sigma_a_inv = 1/Var(theta) + (s_a^2 / sigma_a^2)
-        precision = (1.0 / var_theta) + (s_a**2 / (sigma_a**2 + 1e-8))
+        precision = (1.0 / var_theta) + (s_a**2 / (sigma_a**2 + 1e-4))
         return jnp.eye(self.prior.d_theta) * precision
     
     def estimate_local_precision(self, a, theta_a, x_0_T):
