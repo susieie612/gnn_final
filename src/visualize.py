@@ -49,14 +49,15 @@ def plot_posterior_samples(samples, theta_true, param_names=None, save_path=None
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
+    plt.show()
 
 
-def plot_training_loss(losses, save_path=None, simulation_name=None):
+def plot_training_loss(losses, save_path=None, simulation_name=None, simulation_length=None):
     """
     Plot training loss curve with log scale.
     Args:
         losses: list of loss values recorded during training
+        simulation_length: time steps T (included in title)
     """
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 
@@ -73,14 +74,19 @@ def plot_training_loss(losses, save_path=None, simulation_name=None):
     ax2.set_title('Training Loss (log scale)')
     ax2.grid(True, alpha=0.3)
 
+    title = ''
     if simulation_name:
-        fig.suptitle(f'{simulation_name} Training', fontsize=13)
+        title = simulation_name
+    if simulation_length is not None:
+        title += f' with T={simulation_length}'
+    if title:
+        fig.suptitle(f'{title} Training', fontsize=13)
 
     plt.tight_layout()
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
+    plt.show()
 
 
 def plot_pairwise_posterior(samples, theta_true, param_names=None, save_path=None, simulation_name=None):
@@ -135,7 +141,7 @@ def plot_pairwise_posterior(samples, theta_true, param_names=None, save_path=Non
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
+    plt.show()
 
 
 def plot_posterior_predictive(key, sim, samples, x_obs, theta_true,
@@ -199,7 +205,7 @@ def plot_posterior_predictive(key, sim, samples, x_obs, theta_true,
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
+    plt.show()
 
 
 def plot_summary_table(samples, theta_true, param_names=None, save_path=None, simulation_name=None):
@@ -260,7 +266,7 @@ def plot_summary_table(samples, theta_true, param_names=None, save_path=None, si
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
+    plt.show()
 
 
 def plot_reverse_trajectory(final_sampler, key, x_obs, theta_true, save_path=None):
@@ -302,7 +308,7 @@ def plot_reverse_trajectory(final_sampler, key, x_obs, theta_true, save_path=Non
 
     if save_path:
         plt.savefig(save_path)
-    plt.close()
+    plt.show()
 
 
 def visualise_local_transition(key, model, params, sim, sde, n_samples=500):
@@ -346,4 +352,4 @@ def visualise_local_transition(key, model, params, sim, sde, n_samples=500):
         axes[i].legend()
     
     plt.tight_layout()
-    plt.close()
+    plt.show()

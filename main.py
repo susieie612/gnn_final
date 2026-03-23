@@ -250,12 +250,12 @@ if __name__ == "__main__":
     # 1) Training loss curve
     plot_training_loss(
         losses,
-        save_path=f"{plot_dir}/{active_sim_name}_training_loss.png",
+        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_training_loss.png",
         simulation_name=active_sim_name,
+        simulation_length=time_step,
     )
 
     # 2) 1D marginal posterior histograms
-    print("Plotting the 1D marginal histograms")
     plot_posterior_samples(
         samples_raw,
         theta_true,
@@ -265,7 +265,6 @@ if __name__ == "__main__":
     )
 
     # 3) Pairwise posterior (corner plot)
-    print("Plotting the pairwise posterior (corner plot)")
     if sim.d_theta >= 2:
         plot_pairwise_posterior(
             samples_raw,
@@ -275,7 +274,6 @@ if __name__ == "__main__":
         )
 
     # 4) Summary statistics table
-    print("Plotting the summary statistics table")
     plot_summary_table(
         samples_raw,
         theta_true,
@@ -284,7 +282,6 @@ if __name__ == "__main__":
     )
 
     # 5) Posterior predictive check
-    print("Plotting the predictive check")
     plot_posterior_predictive(
         key, sim, samples_raw, x_obs_target, theta_true,
         num_trajectories=20,
@@ -294,7 +291,6 @@ if __name__ == "__main__":
     )
 
     # 6) Reverse SDE trajectory
-    print("Plotting the reverse SDE trajectory")
     plot_reverse_trajectory(
         final_sampler,
         key,
