@@ -3,13 +3,14 @@ import jax.numpy as jnp
 from jax import random
 import math
 
-class GaussianRandomWalk: 
-    def __init__(self, dim=1, alpha=0.9, sigma=1.0): 
-        self.dim = dim 
-        self.alpha = alpha 
-        self.sigma = sigma 
-        self.d_x = dim      
+class GaussianRandomWalk:
+    def __init__(self, dim=1, alpha=0.9, sigma=1.0):
+        self.dim = dim
+        self.alpha = alpha
+        self.sigma = sigma
+        self.d_x = dim
         self.d_theta = dim
+        self.prior_var = 3.0  # Var(Uniform(-3,3)) = 36/12 = 3.0
         
     def prior(self, key, batch): 
         return random.uniform(key, (batch, self.dim), minval=-3.0, maxval=3.0) 
@@ -26,8 +27,9 @@ class MixtureRandomWalk:
     def __init__(self, dim=5, sigma=1.0):
         self.dim = dim
         self.sigma = sigma
-        self.d_x = dim      
+        self.d_x = dim
         self.d_theta = dim
+        self.prior_var = 3.0  # Var(Uniform(-3,3))
         
     def prior(self, key, batch): 
         return random.uniform(key, (batch, self.dim), minval=-3.0, maxval=3.0) 
@@ -46,12 +48,12 @@ class PeriodicSDE:
     def __init__(self, dt=0.05, sigma=0.5):
         self.dt = dt
         self.sigma = sigma
-        self.dim = dim
         self.d_x = 2
         self.d_theta = 2
-    
+        self.prior_var = 1.0  # Var(Normal(0,1))
+
     def prior(self, key, batch):
-        return random.uniform(key, (batch, 1), minval=-3.0, maxval=3.0)
+        return random.normal(key, (batch, 2))
     
     def proposal(self, key, batch):
         x = random.normal(key, (batch, 2))
@@ -73,9 +75,10 @@ class LinearSDE:
         self.dim = dim
         self.d_x = dim
         self.d_theta = theta_dim
+        self.prior_var = 1.0  # Var(Normal(0,1))
         
     def prior(self, key, batch):
-        return random.uniform(key, (batch, self.theta_dim), minval=-1.0, maxval=1.0)
+        return random.normal(key, (batch, self.d_theta))
     
     def proposal(self, key, batch):
         x = random.normal(key, (batch, self.dim))
@@ -97,9 +100,10 @@ class DoubleWellSDE:
     def __init__(self, dt=0.01, sigma=0.5, dim=1):
         self.dt = dt
         self.sigma = sigma
-        self.d_x = 4
+        self.d_x = dim
         self.d_theta = 2
         self.dim = dim
+        self.prior_var = 1.33  # approx avg: Var(U(-2,2))=1.33, Var(U(-2,0))=0.33
     
     def prior(self, key, batch):
         k1, k2 = random.split(key)
@@ -125,6 +129,7 @@ class LotkaVolterra:
         self.eps = eps
         self.d_x = 2      # [x, y]
         self.d_theta = 4  # [alpha, beta, delta, gamma]
+        self.prior_var = 1.0  # Var(Normal(0,1))
         
     def transition(self, key, x_t, theta):
         alpha, beta, delta, gamma = theta.T
@@ -159,6 +164,7 @@ class SIR:
         self.eps = eps
         self.d_x = 3      # [S, I, R]
         self.d_theta = 2  # [beta, gamma]
+        self.prior_var = 1.0  # Var(Normal(0,1))
 
     def transition(self, key, x_t, theta):
         beta, gamma = theta.T
@@ -184,9 +190,9 @@ class SIR:
         return x #jnp.exp(x)
 
     def proposal(self, key, batch):
-        key, subkey = random.split(key)
-        S = random.uniform(subkey, (batch,), minval=0.5, maxval=1.0)
-        I = random.uniform(subkey, (batch,), minval=0.0, maxval=0.5)
+        key, k1, k2 = random.split(key, 3)
+        S = random.uniform(k1, (batch,), minval=0.5, maxval=1.0)
+        I = random.uniform(k2, (batch,), minval=0.0, maxval=0.5)
         R = jnp.zeros(batch)
         return key, jnp.stack([S, I, R], axis=1)
 
@@ -203,6 +209,7 @@ class KolmogorovFlow:
         self.forcing_pattern = jnp.sin(y)[None, :].repeat(N, axis=0)
         self.d_x = 4096
         self.d_theta = 2
+        self.prior_var = 1.0  # Var(Normal(0,1))
         
     def prior(self, key, batch):
         key1, key2 = random.split(key)
@@ -259,12 +266,16 @@ def kf_proposal(sim):
 #         states.append(x)
 #     return jnp.stack(states)
 
-def lv_traj(key, sim, theta, x0, T):
+def generate_trajectory(key, sim, theta, x0, T):
+    """Generate a trajectory of T steps for any simulator."""
     states = [x0]
     x = x0
     for _ in range(T):
         key, subkey = random.split(key)
         x = sim.transition(subkey, x, theta)
         states.append(x)
-    
+
     return jnp.stack(states).squeeze(axis=1)
+
+# backward compatibility alias
+lv_traj = generate_trajectory

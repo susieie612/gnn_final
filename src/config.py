@@ -1,6 +1,6 @@
 # src/config.py
 config = {
-    "active_sim": "LotkaVolterra", ## change this part to use different simulator
+    "active_sim": "GaussianRandomWalk", ## change this part to use different simulator
     
     "model": {
         "hidden_dim": 128,
@@ -21,7 +21,7 @@ config = {
         "GaussianRandomWalk": {
             "name": "GaussianRandomWalk",
             "params": {"dim": 1, "alpha": 0.9, "sigma": 1.0},
-            "target": {"theta_true": [0.5], "x0_true": [0.0], "time_steps": 5}
+            "target": {"theta_true": [0.5], "x0_true": [0.0], "time_steps": 100}
         },
         "MixtureRandomWalk": {
             "name": "MixtureRandomWalk",
@@ -55,12 +55,12 @@ config = {
         "SIR": {
             "name": "SIR",
             "params": {"sigma": 0.02, "dt": 0.01},
-            "target": {"theta_true": [0.2, 0.1], "x0_true": [0.99, 0.01, 0.0], "time_steps": 5}
+            "target": {"theta_true": [0.2, 0.1], "x0_true": [0.99, 0.01, 0.0], "time_steps": 50}
         },
         "KolmogorovFlow": {
             "name": "KolmogorovFlow",
             "params": {"dt": 0.01, "sigma": 5e-3, "N": 32},
-            "target": {"theta_true": [1.0, 1.0], "x0_true": None, "time_steps": 10} # x0는 x0(key, batch) 메서드로 생성 권장
+            "target": {"theta_true": [1.0, 1.0], "x0_true": None, "time_steps": 50} # x0는 x0(key, batch) 메서드로 생성 권장
         }
     },
 }
