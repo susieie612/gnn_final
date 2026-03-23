@@ -49,7 +49,7 @@ def plot_posterior_samples(samples, theta_true, param_names=None, save_path=None
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
 def plot_training_loss(losses, save_path=None, simulation_name=None):
@@ -80,7 +80,7 @@ def plot_training_loss(losses, save_path=None, simulation_name=None):
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
 def plot_pairwise_posterior(samples, theta_true, param_names=None, save_path=None, simulation_name=None):
@@ -135,7 +135,7 @@ def plot_pairwise_posterior(samples, theta_true, param_names=None, save_path=Non
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
 def plot_posterior_predictive(key, sim, samples, x_obs, theta_true,
@@ -199,7 +199,7 @@ def plot_posterior_predictive(key, sim, samples, x_obs, theta_true,
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
 def plot_summary_table(samples, theta_true, param_names=None, save_path=None, simulation_name=None):
@@ -260,7 +260,7 @@ def plot_summary_table(samples, theta_true, param_names=None, save_path=None, si
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
 def plot_reverse_trajectory(final_sampler, key, x_obs, theta_true, save_path=None):
@@ -302,7 +302,7 @@ def plot_reverse_trajectory(final_sampler, key, x_obs, theta_true, save_path=Non
 
     if save_path:
         plt.savefig(save_path)
-    plt.show()
+    plt.close()
 
 
 def visualise_local_transition(key, model, params, sim, sde, n_samples=500):
@@ -346,4 +346,4 @@ def visualise_local_transition(key, model, params, sim, sde, n_samples=500):
         axes[i].legend()
     
     plt.tight_layout()
-    plt.show()
+    plt.close()

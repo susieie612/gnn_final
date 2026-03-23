@@ -1,3 +1,5 @@
+import os
+import numpy as np
 import jax
 import jax.numpy as jnp
 import optax
@@ -217,13 +219,6 @@ if __name__ == "__main__":
 
     plot_dir = f"plots/{active_sim_name}"
 
-    # 1) Training loss curve
-    plot_training_loss(
-        losses,
-        save_path=f"{plot_dir}/{active_sim_name}_training_loss.png",
-        simulation_name=active_sim_name,
-    )
-
     # generate ground truth
     target_cfg = sim_cfg['target']
     theta_true = jnp.array([target_cfg['theta_true']])
@@ -250,7 +245,17 @@ if __name__ == "__main__":
         samples_raw = jnp.exp(samples_raw)
         param_transform = jnp.exp
 
-    # 2) 1D marginal posterior histograms (existing)
+    os.makedirs(plot_dir, exist_ok=True)
+
+    # 1) Training loss curve
+    plot_training_loss(
+        losses,
+        save_path=f"{plot_dir}/{active_sim_name}_training_loss.png",
+        simulation_name=active_sim_name,
+    )
+
+    # 2) 1D marginal posterior histograms
+    print("Plotting the 1D marginal histograms")
     plot_posterior_samples(
         samples_raw,
         theta_true,
@@ -260,6 +265,7 @@ if __name__ == "__main__":
     )
 
     # 3) Pairwise posterior (corner plot)
+    print("Plotting the pairwise posterior (corner plot)")
     if sim.d_theta >= 2:
         plot_pairwise_posterior(
             samples_raw,
@@ -268,16 +274,8 @@ if __name__ == "__main__":
             simulation_name=active_sim_name,
         )
 
-    # 4) Posterior predictive check
-    plot_posterior_predictive(
-        key, sim, samples_raw, x_obs_target, theta_true,
-        num_trajectories=20,
-        param_transform=None,  # samples_raw is already transformed
-        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_predictive.png",
-        simulation_name=active_sim_name,
-    )
-
-    # 5) Summary statistics table
+    # 4) Summary statistics table
+    print("Plotting the summary statistics table")
     plot_summary_table(
         samples_raw,
         theta_true,
@@ -285,7 +283,18 @@ if __name__ == "__main__":
         simulation_name=active_sim_name,
     )
 
-    # 6) Reverse SDE trajectory (existing)
+    # 5) Posterior predictive check
+    print("Plotting the predictive check")
+    plot_posterior_predictive(
+        key, sim, samples_raw, x_obs_target, theta_true,
+        num_trajectories=20,
+        param_transform=None,
+        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_predictive.png",
+        simulation_name=active_sim_name,
+    )
+
+    # 6) Reverse SDE trajectory
+    print("Plotting the reverse SDE trajectory")
     plot_reverse_trajectory(
         final_sampler,
         key,

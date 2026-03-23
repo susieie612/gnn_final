@@ -21,7 +21,7 @@ config = {
         "GaussianRandomWalk": {
             "name": "GaussianRandomWalk",
             "params": {"dim": 1, "alpha": 0.9, "sigma": 1.0},
-            "target": {"theta_true": [0.5], "x0_true": [0.0], "time_steps": 100}
+            "target": {"theta_true": [0.5], "x0_true": [0.0], "time_steps": 5}
         },
         "MixtureRandomWalk": {
             "name": "MixtureRandomWalk",
