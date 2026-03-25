@@ -4,16 +4,19 @@ import jax.numpy as jnp
 
 class GAUSSScoreFn:
     """Based on section 3.2.2 GAUSS model"""
-    def __init__(self, score_net, params, sde, prior, diffuser, marginal_prior_fn, num_samples=500):
-        self.score_net = score_net # LocalScoreNet 
+    def __init__(self, score_net, params, sde, prior, diffuser, marginal_prior_fn,
+                 num_samples=500, diag_threshold=8):
+        self.score_net = score_net # LocalScoreNet
         self.params = params
         self.sde = sde
         self.prior = prior
         self.diffuser = diffuser # reverse.py
         self.marginal_prior_fn = marginal_prior_fn
         self.num_samples = num_samples
+        # use diagonal precision when d_theta > threshold (full matrix unreliable)
+        self.use_diag = prior.d_theta > diag_threshold
 
-    def __call__(self, a, theta_a, x_0_T, ensure_pd = True, **kwargs):
+    def __call__(self, a, theta_a, x_0_T, ensure_pd=True, **kwargs):
         """
         Args:
         a: diffusion time
@@ -29,40 +32,29 @@ class GAUSSScoreFn:
         x_pairs = jnp.squeeze(x_pairs, axis=0) # (T-1, 2*d_x)
         num_transitions = x_pairs.shape[0]
 
-        # Broadcast tehta_a and a
+        # Broadcast theta_a and a
         theta_a_batch = jnp.repeat(theta_a[jnp.newaxis, ...], num_transitions, axis=0) # (T-1, d_theta)
         a_batch = jnp.repeat(jnp.atleast_1d(a)[jnp.newaxis, ...], num_transitions, axis=0) # (T-1, 1)
 
         # 1. calculate the local score (s_phi)
-        local_scores = self.score_net.apply({'params': self.params}, 
-                                                x_pairs,  # ( T-1, 2 * d_x)
+        local_scores = self.score_net.apply({'params': self.params},
+                                                x_pairs,  # (T-1, 2 * d_x)
                                                 theta_a_batch, # (T-1, d_theta)
                                                 a_batch
-                                                ) # ( T-1, d_theta)
-        # local_scores = jnp.squeeze(local_scores, axis=0)  # B = 1
+                                                ) # (T-1, d_theta)
 
-        # noise version
-        # noise_pred = self.score_net.apply({'params': self.params}, x_0_T,
-        #                                         theta_a[jnp.newaxis, ...],
-        #                                         jnp.atleast_1d(a))
-        # noise_pred = jnp.squeeze(noise_pred, axis=0)
-
-        # std_a = self.sde.std(a)
-        # local_scores = -noise_pred / (std_a + 1e-8)
-
-
-        # 2. Calculate the inverse covarainces
+        # 2. Calculate the inverse covariances
         # \Sigma_a^-1  --> precision of p(\theta | theta_a)
-        sigma_a_inv = self.get_prior_precision(a) # (d_tehta, d_theta)
+        sigma_a_inv = self.get_prior_precision(a) # (d_theta, d_theta)
         # \Sigma_a,t,t+1^-1 --> precision of local posterior p(\theta | theta_a, x^t,t+1)
-        sigma_a_t_inv = self.estimate_local_precision(a, theta_a, x_0_T) # (T-1, d_tehta, d_tehta)
-        
+        sigma_a_t_inv = self.estimate_local_precision(a, theta_a, x_0_T) # (T-1, d_theta, d_theta)
 
-        # 3. lambda_a = Sum (\simga_a,t,t+1 ^-1 + (1-T) \sigma_a^-1
+
+        # 3. lambda_a = Sum (\sigma_a,t,t+1 ^-1) + (1-T) \sigma_a^-1
         lambda_a = jnp.sum(sigma_a_t_inv, axis=0) + (1 - num_transitions) * sigma_a_inv
-        
-        # ensure lambda_a positive definiteness 
-        # using eigenvalue decomposition (appendix B. 3)
+
+        # ensure lambda_a positive definiteness
+        # using eigenvalue decomposition (appendix B.3)
         if ensure_pd is True:
             eps = 1e-3
             lambda_a = (lambda_a + lambda_a.T) / 2.0 # ensure symmetry
@@ -70,21 +62,21 @@ class GAUSSScoreFn:
 
             # identify negative eigenvalues
             min_eig = jnp.minimum(eigenvalues, 0.0)
-            lambda_minus = - (eigenvectors @ jnp.diag(min_eig) @ eigenvectors.T )
-            
+            lambda_minus = -(eigenvectors @ jnp.diag(min_eig) @ eigenvectors.T)
+
             adjustment = (lambda_minus / num_transitions) + eps * jnp.eye(lambda_a.shape[0])
             sigma_a_t_inv = sigma_a_t_inv + adjustment[jnp.newaxis, ...]
 
             lambda_a = jnp.sum(sigma_a_t_inv, axis=0) + (1 - num_transitions) * sigma_a_inv
             lambda_a = (lambda_a + lambda_a.T) / 2
- 
+
 
         # 4. compose global score
         # 1st term
         weighted_local_sum = jnp.sum(jax.vmap(lambda prec, score: prec @ score)(sigma_a_t_inv, local_scores), axis=0)
         # 2nd term
         prior_score = self.marginal_prior_fn(a, jnp.squeeze(theta_a)) # p(theta_a)
-        prior_score = jnp.atleast_1d(prior_score) # for simulations with scalar prior 
+        prior_score = jnp.atleast_1d(prior_score) # for simulations with scalar prior
 
         weighted_prior_term = (1 - num_transitions) * (sigma_a_inv @ prior_score)
 
@@ -96,18 +88,13 @@ class GAUSSScoreFn:
         return global_score
 
     def apply(self, others, x_0_T, theta_a, a):
-        """ to match the EulserMaruyama interface (reverse.py)"""
-        # theta_val = jnp.squeeze(theta_a)
-        # a_val = jnp.squeeze(a)
-
-        # score = self.__call__(a_val, theta_val, x_0_T) 
-        # return score[jnp.newaxis, ...]
+        """to match the EulerMaruyama interface (reverse.py)"""
         theta_val = jnp.atleast_1d(jnp.squeeze(theta_a))
         a_val = jnp.atleast_1d(jnp.squeeze(a))
 
-        score = self.__call__(a_val[0], theta_val, x_0_T) 
-        return score[jnp.newaxis, ...] # (1, d_theta) 
-    
+        score = self.__call__(a_val[0], theta_val, x_0_T)
+        return score[jnp.newaxis, ...] # (1, d_theta)
+
 
     def get_prior_precision(self, a):
         """Prior precision: 1 / Var(θ_a) where θ_a ~ N(0, s_a² * var_theta + σ_a²)"""
@@ -119,24 +106,36 @@ class GAUSSScoreFn:
         var_a = (s_a**2) * var_theta + (sigma_a**2)
         precision = 1.0 / (var_a + 1e-8)
         return jnp.eye(self.prior.d_theta) * precision
-    
+
     def estimate_local_precision(self, a, theta_a, x_0_T):
         """
-        estimate the local posterior by sampling using the diffuser
-        x_0_T: array(1, T, d_x) 
+        Estimate the local posterior precision by sampling using the diffuser.
+        Uses diagonal approximation when d_theta is large.
+        x_0_T: array(1, T, d_x)
         """
         x_single = jnp.squeeze(x_0_T, axis=0)
         x_pairs = jnp.concatenate([x_single[:-1], x_single[1:]], axis=-1) # (T-1, 2*d_x)
+        d_theta = self.prior.d_theta
 
         def single_transition_precision(x_pair, key):
-            
+
             keys = jax.random.split(key, self.num_samples)
             samples = jax.vmap(lambda k: self.diffuser.sample_conditional(k, x_pair, a, theta_a))(keys)
 
-            cov = jnp.atleast_2d(jnp.cov(samples, rowvar=False))
+            if self.use_diag:
+                # diagonal approximation: only estimate per-dimension variance
+                # much more stable for high-dimensional theta
+                var = jnp.var(samples, axis=0) + 1e-2
+                precision = jnp.diag(1.0 / var)
+                precision = jnp.clip(precision, -100.0, 100.0)
+            else:
+                cov = jnp.atleast_2d(jnp.cov(samples, rowvar=False))
+                reg = 1e-2 * jnp.eye(cov.shape[0])
+                precision = jnp.linalg.inv(cov + reg)
+                precision = jnp.clip(precision, -100.0, 100.0)
 
-            return jnp.linalg.inv(cov + 1e-6 * jnp.eye(cov.shape[0])) # Tikhonov regularization
-        
+            return precision
+
         # calculate precision for all steps
         batch_keys = jax.random.split(jax.random.PRNGKey(42), x_pairs.shape[0])
         return jax.vmap(single_transition_precision)(x_pairs, batch_keys)

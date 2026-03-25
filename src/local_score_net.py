@@ -45,7 +45,7 @@ class LocalScoreNet(nn.Module):
     @nn.compact
     def __call__(self, x_t, theta, a):
         """
-        입력 x_t를 (N, 2 * d_x)로 변환하여 MLP에 전달
+        transform x_t into shape (N, 2 * d_x) and pass to MLP
         """
         # for inference
         if x_t.ndim == 3:
@@ -93,7 +93,6 @@ class LocalScoreNet(nn.Module):
 #         print(f"[LocalScoreNet] x_t shape: {x_t.shape}")
 
 #         if x_t.ndim == 2:
-#             # 학습 시에는 이미 (x_t, x_next)가 합쳐진 x_input(B, 2*d_x)이 들어온다고 가정
 #             return self.mlp(x_t, theta, a)
 
 #         B, T, d_x = x_t.shape # Batch, steps, x dimension

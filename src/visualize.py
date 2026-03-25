@@ -49,25 +49,33 @@ def plot_posterior_samples(samples, theta_true, param_names=None, save_path=None
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
-def plot_training_loss(losses, save_path=None, simulation_name=None, simulation_length=None):
+def plot_training_loss(losses, val_losses=None, save_path=None, simulation_name=None, simulation_length=None):
     """
-    Plot training loss curve with log scale.
+    Plot training loss curve with log scale, optionally overlaying validation loss.
     Args:
-        losses: list of loss values recorded during training
+        losses: list of training loss values
+        val_losses: list of (step, val_loss) tuples, or None
         simulation_length: time steps T (included in title)
     """
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 
-    ax1.plot(losses, color='steelblue', linewidth=0.8)
+    ax1.plot(losses, color='steelblue', linewidth=0.8, label='Train')
+    if val_losses:
+        val_steps, val_vals = zip(*val_losses)
+        ax1.plot(val_steps, val_vals, color='tomato', linewidth=1.2, marker='.', markersize=3, label='Val')
+        ax1.legend()
     ax1.set_xlabel('Training Step')
     ax1.set_ylabel('Loss')
     ax1.set_title('Training Loss')
     ax1.grid(True, alpha=0.3)
 
-    ax2.plot(losses, color='steelblue', linewidth=0.8)
+    ax2.plot(losses, color='steelblue', linewidth=0.8, label='Train')
+    if val_losses:
+        ax2.plot(val_steps, val_vals, color='tomato', linewidth=1.2, marker='.', markersize=3, label='Val')
+        ax2.legend()
     ax2.set_yscale('log')
     ax2.set_xlabel('Training Step')
     ax2.set_ylabel('Loss (log scale)')
@@ -86,7 +94,7 @@ def plot_training_loss(losses, save_path=None, simulation_name=None, simulation_
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
 def plot_pairwise_posterior(samples, theta_true, param_names=None, save_path=None, simulation_name=None):
@@ -141,7 +149,7 @@ def plot_pairwise_posterior(samples, theta_true, param_names=None, save_path=Non
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
 def plot_posterior_predictive(key, sim, samples, x_obs, theta_true,
@@ -205,7 +213,7 @@ def plot_posterior_predictive(key, sim, samples, x_obs, theta_true,
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 
 def plot_summary_table(samples, theta_true, param_names=None, save_path=None, simulation_name=None):
@@ -266,7 +274,80 @@ def plot_summary_table(samples, theta_true, param_names=None, save_path=None, si
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.close()
+
+
+@jax.jit
+def compute_swd(samples_a, samples_b, num_projections=500, key=jax.random.PRNGKey(42)):
+    """
+    Sliced Wasserstein Distance between two sample sets.
+    Args:
+        samples_a, samples_b: (num_samples, d_theta) — any two sets of samples
+        num_projections: number of random 1D projections
+    Returns:
+        scalar SWD value
+    """
+    num_dims = samples_a.shape[1]
+    n = min(samples_a.shape[0], samples_b.shape[0])
+    samples_a = samples_a[:n]
+    samples_b = samples_b[:n]
+
+    dirs = jax.random.normal(key, shape=(num_projections, num_dims))
+    dirs = dirs / jnp.linalg.norm(dirs, axis=1, keepdims=True)
+
+    proj_a = jnp.dot(samples_a, dirs.T)
+    proj_b = jnp.dot(samples_b, dirs.T)
+
+    proj_a_sorted = jnp.sort(proj_a, axis=0)
+    proj_b_sorted = jnp.sort(proj_b, axis=0)
+
+    w_dist = jnp.mean((proj_a_sorted - proj_b_sorted) ** 2, axis=0) ** 0.5
+    return jnp.mean(w_dist)
+
+
+def compute_swd_vs_prior(key, sim, posterior_samples, num_prior=None):
+    """
+    SWD between posterior samples and prior samples.
+    Measures how much the posterior has concentrated relative to the prior.
+    """
+    n = posterior_samples.shape[0]
+    if num_prior is None:
+        num_prior = n
+    prior_samples = sim.prior(key, num_prior)
+    swd = compute_swd(jnp.array(posterior_samples), jnp.array(prior_samples))
+    return float(swd), np.array(prior_samples)
+
+
+def plot_swd_across_T(swd_dict, save_path=None, simulation_name=None):
+    """
+    Bar chart of SWD(posterior, prior) across different sequence lengths T.
+    Args:
+        swd_dict: {T_value: swd_score, ...}  e.g. {5: 0.32, 10: 0.58, 20: 0.91}
+    """
+    Ts = sorted(swd_dict.keys())
+    swds = [swd_dict[t] for t in Ts]
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    bars = ax.bar([str(t) for t in Ts], swds, color='steelblue', edgecolor='white')
+
+    for bar, val in zip(bars, swds):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                f'{val:.4f}', ha='center', va='bottom', fontsize=10)
+
+    ax.set_xlabel('Sequence Length T')
+    ax.set_ylabel('SWD (Posterior vs Prior)')
+    ax.grid(True, alpha=0.2, axis='y')
+
+    title = 'SWD: Posterior vs Prior'
+    if simulation_name:
+        title = f'{simulation_name} {title}'
+    ax.set_title(title, fontsize=13)
+
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
 
 
 def plot_reverse_trajectory(final_sampler, key, x_obs, theta_true, save_path=None):
@@ -308,7 +389,7 @@ def plot_reverse_trajectory(final_sampler, key, x_obs, theta_true, save_path=Non
 
     if save_path:
         plt.savefig(save_path)
-    plt.show()
+    plt.close()
 
 
 def visualise_local_transition(key, model, params, sim, sde, n_samples=500):
@@ -352,4 +433,4 @@ def visualise_local_transition(key, model, params, sim, sde, n_samples=500):
         axes[i].legend()
     
     plt.tight_layout()
-    plt.show()
+    plt.close()

@@ -60,35 +60,46 @@ class PeriodicSDE:
         return key, x
     
     def transition(self, key, x, theta):
-        omega = theta[:, 0]
-        zeros = jnp.zeros_like(omega)
+        t0 = theta[:, 0] ** 2  # squared to ensure positive frequency
+        t1 = theta[:, 1] ** 2
+        zeros = jnp.zeros_like(t0)
         A = jnp.stack([
-            jnp.stack([zeros, -omega], axis=1),
-            jnp.stack([omega, zeros], axis=1)], axis=1)
+            jnp.stack([zeros, -t0], axis=1),
+            jnp.stack([t1, zeros], axis=1)], axis=1)
         drift = jnp.matmul(A, x[..., None]).squeeze(-1)
         noise = self.sigma * jnp.sqrt(self.dt) * random.normal(key, x.shape)
         return x + drift * self.dt + noise
 
 class LinearSDE:
-    def __init__(self, dt=0.05, dim=3, theta_dim=18):
+    def __init__(self, dt=0.05, dim=3, theta_dim=18, diagonal=False):
         self.dt = dt
         self.dim = dim
         self.d_x = dim
-        self.d_theta = theta_dim
+        self.diagonal = diagonal
+        if diagonal:
+            self.d_theta = 2 * dim  # A_diag + B_diag
+        else:
+            self.d_theta = theta_dim
         self.prior_var = 1.0  # Var(Normal(0,1))
-        
+
     def prior(self, key, batch):
         return random.normal(key, (batch, self.d_theta))
-    
+
     def proposal(self, key, batch):
         x = random.normal(key, (batch, self.dim))
         return key, x
-    
+
     def unpack(self, theta):
-        A = theta[:, :9].reshape(-1, 3, 3)
-        B = theta[:, 9:].reshape(-1, 3, 3)
+        if self.diagonal:
+            a_diag = theta[:, :self.dim]
+            b_diag = theta[:, self.dim:]
+            A = jax.vmap(jnp.diag)(a_diag)  # (batch, dim, dim)
+            B = jax.vmap(jnp.diag)(b_diag)
+        else:
+            A = theta[:, :9].reshape(-1, 3, 3)
+            B = theta[:, 9:].reshape(-1, 3, 3)
         return A, B
-    
+
     def transition(self, key, x, theta):
         A, B = self.unpack(theta)
         drift = jnp.matmul(A, x[..., None]).squeeze(-1)

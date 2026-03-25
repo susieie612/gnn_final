@@ -12,7 +12,7 @@ from src.config import config
 from src.visualize import (plot_posterior_samples, visualise_local_transition,
                            plot_reverse_trajectory, plot_training_loss,
                            plot_pairwise_posterior, plot_posterior_predictive,
-                           plot_summary_table)
+                           plot_summary_table, compute_swd, compute_swd_vs_prior)
 import src.simulators as sims
 
 class SDE:
@@ -77,8 +77,29 @@ def train(key, model, sim, proposal_fn, config, sim_name=None):
         updates, opt_state = optimizer.update(grads, opt_state, params)
         return optax.apply_updates(params, updates), opt_state, loss
 
-    losses = []
-    print("Starting algorithm 1" )
+    @jax.jit
+    def eval_loss(params, k, theta, x_t, x_next):
+        x_train = jnp.stack([x_t, x_next], axis=1)
+        return denoising_score_matching_loss(params, model, k, theta, x_train, sde)
+
+    # generate fixed validation set (once)
+    val_key = jax.random.PRNGKey(999)
+    vk1, vk2, vk3, vk4 = jax.random.split(val_key, 4)
+    val_theta_raw = sim.prior(vk1, batch_size)
+    val_theta_sim = jnp.exp(val_theta_raw) if sim_name in log_param_sims else val_theta_raw
+    _, val_x_t = proposal_fn(vk2, batch_size)
+    val_x_next = sim.transition(vk3, val_x_t, val_theta_sim)
+
+    val_interval = config.get('val_interval', 500)
+    patience = config.get('patience', 2000)
+
+    train_losses = []
+    val_losses = []
+    best_val_loss = float('inf')
+    best_params = None
+    steps_without_improve = 0
+
+    print("Starting algorithm 1")
     for i in range(num_steps):
         key, k_theta, k_prop, k_sim = jax.random.split(key, 4)
 
@@ -96,31 +117,55 @@ def train(key, model, sim, proposal_fn, config, sim_name=None):
         x_next = sim.transition(k_sim, x_t, theta_sim) # (B, d_x)
 
         params, opt_state, loss = step(params, opt_state, key, theta_raw, x_t, x_next)
-        losses.append(float(loss))
+        train_losses.append(float(loss))
 
-        if i % 1000 == 0:
-            print(f"Step {i}, Loss: {loss:.4f}")
+        # validation
+        if i % val_interval == 0:
+            v_loss = float(eval_loss(params, vk4, val_theta_raw, val_x_t, val_x_next))
+            val_losses.append((i, v_loss))
 
-    return params, losses
+            if v_loss < best_val_loss:
+                best_val_loss = v_loss
+                best_params = jax.tree.map(lambda x: x.copy(), params)
+                steps_without_improve = 0
+            else:
+                steps_without_improve += val_interval
+
+            if i % 1000 == 0:
+                print(f"Step {i}, Train: {loss:.4f}, Val: {v_loss:.4f}"
+                      f"{' *best*' if steps_without_improve == 0 else ''}")
+
+            # early stopping
+            if steps_without_improve >= patience and i > patience:
+                print(f"Early stopping at step {i} (no improvement for {patience} steps)")
+                break
+        elif i % 1000 == 0:
+            print(f"Step {i}, Train: {loss:.4f}")
+
+    # return best params if validation was used
+    final_params = best_params if best_params is not None else params
+    return final_params, train_losses, val_losses
 
 # ALGORITHM 2: compose for noise injected time series
 def infer(key, model, params, sim, x_obs):
     sde = SDE()
-    # grid = jnp.linspace(1e-3, 1.0, 100) 
     grid = jnp.geomspace(1e-2, 1.0, 100)  # for numerical stability near a=0
-    
-    # 1. Create a local sampler for precision estimation    
+
+    # 1. Create a local sampler for precision estimation
     local_kernel = EulerMaruyama(model, params, sde)
     local_sampler = Diffuser(local_kernel, grid, (sim.d_theta,), sde)
-    
+
+    prec_samples = min(200, max(50, 10 * sim.d_theta))
+
     # composition using GAUSS
     gauss_fn = GAUSSScoreFn(
-        score_net=model, 
-        params=params, 
-        sde=sde, 
-        prior=sim, 
+        score_net=model,
+        params=params,
+        sde=sde,
+        prior=sim,
         diffuser=local_sampler,
-        marginal_prior_fn=lambda a, t: marginal_prior_score(a, t, sde, sim.prior_var)
+        marginal_prior_fn=lambda a, t: marginal_prior_score(a, t, sde, sim.prior_var),
+        num_samples=prec_samples,
     )
 
     # sample from final model
@@ -138,6 +183,9 @@ def infer_many(key, model, params, sim, x_obs):
     local_kernel = EulerMaruyama(model, params, sde)
     local_sampler = Diffuser(local_kernel, grid, (sim.d_theta,), sde)
 
+    # precision estimation: fewer samples for speed, more for accuracy
+    prec_samples = min(200, max(50, 10 * sim.d_theta))
+
     # composition using GAUSS
     gauss_fn = GAUSSScoreFn(
         score_net=model,
@@ -145,14 +193,15 @@ def infer_many(key, model, params, sim, x_obs):
         sde=sde,
         prior=sim,
         diffuser=local_sampler,
-        marginal_prior_fn=lambda a, t: marginal_prior_score(a, t, sde, sim.prior_var)
+        marginal_prior_fn=lambda a, t: marginal_prior_score(a, t, sde, sim.prior_var),
+        num_samples=prec_samples,
     )
 
     # sample from final model
     kernel = EulerMaruyama(gauss_fn, params, sde)
     final_sampler = Diffuser(kernel, grid, (sim.d_theta,), sde)
 
-    num_samples = 30
+    num_samples = 100
     chunk_size = 10
     keys = jax.random.split(key, num_samples)
 
@@ -171,7 +220,7 @@ def infer_many(key, model, params, sim, x_obs):
         
     samples = jnp.concatenate(all_samples, axis=0)
     
-    return samples, final_sampler
+    return samples, final_sampler, num_samples
 
 
 def get_simulator(key, sim_name, sim_params):
@@ -215,7 +264,7 @@ if __name__ == "__main__":
     )
 
     # training (Alg 1)
-    trained_params, losses = train(key, model_inference, sim, proposal, config['train'], sim_name=active_sim_name)
+    trained_params, train_losses, val_losses = train(key, model_inference, sim, proposal, config['train'], sim_name=active_sim_name)
 
     plot_dir = f"plots/{active_sim_name}"
 
@@ -236,7 +285,7 @@ if __name__ == "__main__":
 
     # inference (Alg 2)
     print(f"--- Inference for {active_sim_name} with {time_step} time steps ---")
-    samples_raw, final_sampler = infer_many(key, model_inference, trained_params, sim, x_obs_target)
+    samples_raw, final_sampler, num_samples = infer_many(key, model_inference, trained_params, sim, x_obs_target)
 
     # transform for log-space simulators
     param_transform = None
@@ -249,8 +298,9 @@ if __name__ == "__main__":
 
     # 1) Training loss curve
     plot_training_loss(
-        losses,
-        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_training_loss.png",
+        train_losses,
+        val_losses=val_losses,
+        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_N={num_samples}_training_loss.png",
         simulation_name=active_sim_name,
         simulation_length=time_step,
     )
@@ -259,7 +309,7 @@ if __name__ == "__main__":
     plot_posterior_samples(
         samples_raw,
         theta_true,
-        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_posterior.png",
+        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_N={num_samples}_posterior.png",
         simulation_name=active_sim_name,
         simulation_length=time_step,
     )
@@ -269,7 +319,7 @@ if __name__ == "__main__":
         plot_pairwise_posterior(
             samples_raw,
             theta_true,
-            save_path=f"{plot_dir}/{active_sim_name}_{time_step}_corner.png",
+            save_path=f"{plot_dir}/{active_sim_name}_{time_step}_N={num_samples}_corner.png",
             simulation_name=active_sim_name,
         )
 
@@ -277,7 +327,7 @@ if __name__ == "__main__":
     plot_summary_table(
         samples_raw,
         theta_true,
-        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_summary.png",
+        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_N={num_samples}_summary.png",
         simulation_name=active_sim_name,
     )
 
@@ -286,7 +336,7 @@ if __name__ == "__main__":
         key, sim, samples_raw, x_obs_target, theta_true,
         num_trajectories=20,
         param_transform=None,
-        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_predictive.png",
+        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_N={num_samples}_predictive.png",
         simulation_name=active_sim_name,
     )
 
@@ -296,5 +346,13 @@ if __name__ == "__main__":
         key,
         x_obs_target,
         theta_true,
-        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_trajectory.png",
+        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_N={num_samples}_trajectory.png",
     )
+
+    # 7) Sliced Wasserstein Distance (posterior vs prior)
+    swd_val, _ = compute_swd_vs_prior(key, sim, samples_raw)
+    print(f"\n{'='*50}")
+    print(f"SWD (Posterior vs Prior): {swd_val:.6f}")
+    print(f"  - Higher = posterior is more concentrated (good)")
+    print(f"  - Near 0 = posterior ≈ prior (uninformative)")
+    print(f"{'='*50}")
