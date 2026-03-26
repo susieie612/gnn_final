@@ -13,6 +13,10 @@ from src.visualize import (plot_posterior_samples, visualise_local_transition,
                            plot_reverse_trajectory, plot_training_loss,
                            plot_pairwise_posterior, plot_posterior_predictive,
                            plot_summary_table, compute_swd, compute_swd_vs_prior)
+from src.metrics import (Timer, posterior_accuracy_metrics, gauss_stability_metrics,
+                         reverse_sde_diagnostics, posterior_predictive_metrics,
+                         posterior_concentration_metrics, generate_metrics_table,
+                         print_metrics_summary)
 import src.simulators as sims
 
 class SDE:
@@ -238,9 +242,65 @@ def get_simulator(key, sim_name, sim_params):
 
 
 
+def save_results(result_dir, samples_raw, samples_pretransform, x_obs, theta_true,
+                 train_losses, val_losses, num_samples, time_step, sim_name):
+    """Save all inference results as .npy files for reuse without re-running."""
+    os.makedirs(result_dir, exist_ok=True)
+    np.save(os.path.join(result_dir, 'samples.npy'), np.array(samples_raw))
+    np.save(os.path.join(result_dir, 'samples_pretransform.npy'), np.array(samples_pretransform))
+    np.save(os.path.join(result_dir, 'x_obs.npy'), np.array(x_obs))
+    np.save(os.path.join(result_dir, 'theta_true.npy'), np.array(theta_true))
+    np.save(os.path.join(result_dir, 'train_losses.npy'), np.array(train_losses))
+    if val_losses:
+        val_steps, val_vals = zip(*val_losses)
+        np.save(os.path.join(result_dir, 'val_steps.npy'), np.array(val_steps))
+        np.save(os.path.join(result_dir, 'val_vals.npy'), np.array(val_vals))
+    # save metadata
+    np.savez(os.path.join(result_dir, 'meta.npz'),
+             num_samples=num_samples, time_step=time_step, sim_name=sim_name)
+    print(f"Results saved to {result_dir}/")
+
+
+def load_results(result_dir):
+    """Load previously saved results. Returns None if not found."""
+    samples_path = os.path.join(result_dir, 'samples.npy')
+    if not os.path.exists(samples_path):
+        return None
+
+    data = {
+        'samples': jnp.array(np.load(os.path.join(result_dir, 'samples.npy'))),
+        'samples_pretransform': np.load(os.path.join(result_dir, 'samples_pretransform.npy')),
+        'x_obs': jnp.array(np.load(os.path.join(result_dir, 'x_obs.npy'))),
+        'theta_true': jnp.array(np.load(os.path.join(result_dir, 'theta_true.npy'))),
+        'train_losses': np.load(os.path.join(result_dir, 'train_losses.npy')).tolist(),
+    }
+
+    val_steps_path = os.path.join(result_dir, 'val_steps.npy')
+    if os.path.exists(val_steps_path):
+        val_steps = np.load(val_steps_path)
+        val_vals = np.load(os.path.join(result_dir, 'val_vals.npy'))
+        data['val_losses'] = list(zip(val_steps.tolist(), val_vals.tolist()))
+    else:
+        data['val_losses'] = []
+
+    meta = np.load(os.path.join(result_dir, 'meta.npz'), allow_pickle=True)
+    data['num_samples'] = int(meta['num_samples'])
+    data['time_step'] = int(meta['time_step'])
+
+    print(f"Loaded cached results from {result_dir}/")
+    return data
+
+
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--rerun', action='store_true',
+                        help='Force re-training and re-inference even if cached results exist')
+    args = parser.parse_args()
+
     key = jax.random.PRNGKey(0)
     sim_cfg = config['sim']
+    timer = Timer()
 
     # load simulator
     active_sim_name = config['active_sim']
@@ -256,43 +316,67 @@ if __name__ == "__main__":
     model_config['d_theta'] = sim.d_theta
     model_config['d_x'] = sim.d_x
 
-    model_inference = LocalScoreNet(
-        config=model_config
-        # hidden_dim = config['model']['hidden_dim'],
-        # d_theta = sim.d_theta,
-        # d_x = sim.d_x
-    )
-
-    # training (Alg 1)
-    trained_params, train_losses, val_losses = train(key, model_inference, sim, proposal, config['train'], sim_name=active_sim_name)
-
-    plot_dir = f"plots/{active_sim_name}"
-
-    # generate ground truth
     target_cfg = sim_cfg['target']
-    theta_true = jnp.array([target_cfg['theta_true']])
-
-    if target_cfg["x0_true"] is not None:
-        x0_true = jnp.array([target_cfg["x0_true"]])
-    else:
-        _, x0_true = sim.x0(key, 1)
-
-    # generate trajectory
     time_step = target_cfg["time_steps"]
 
-    from src.simulators import generate_trajectory
-    x_obs_target = generate_trajectory(key, sim, theta_true, x0_true, T=time_step)
+    # results/ directory: results/{SimName}/T{time_step}/
+    result_dir = f"results/{active_sim_name}/T{time_step}"
+    plot_dir = f"plots/{active_sim_name}"
 
-    # inference (Alg 2)
-    print(f"--- Inference for {active_sim_name} with {time_step} time steps ---")
-    samples_raw, final_sampler, num_samples = infer_many(key, model_inference, trained_params, sim, x_obs_target)
+    # ── Try loading cached results ──
+    cached = None if args.rerun else load_results(result_dir)
 
-    # transform for log-space simulators
-    param_transform = None
-    if active_sim_name in ["LotkaVolterra", "SIR"]:
-        samples_raw = jnp.clip(samples_raw, a_min=-15.0, a_max=5.0)
-        samples_raw = jnp.exp(samples_raw)
-        param_transform = jnp.exp
+    if cached is not None:
+        # Use cached data — skip training & inference
+        samples_raw = cached['samples']
+        samples_raw_pretransform = cached['samples_pretransform']
+        x_obs_target = cached['x_obs']
+        theta_true = cached['theta_true']
+        train_losses = cached['train_losses']
+        val_losses = cached['val_losses']
+        num_samples = cached['num_samples']
+        final_sampler = None  # not available from cache
+
+        param_transform = None
+        if active_sim_name in ["LotkaVolterra", "SIR"]:
+            param_transform = jnp.exp
+
+    else:
+        # ── Full pipeline: train + infer ──
+        model_inference = LocalScoreNet(config=model_config)
+
+        timer.start('training')
+        trained_params, train_losses, val_losses = train(
+            key, model_inference, sim, proposal, config['train'], sim_name=active_sim_name)
+        timer.stop()
+
+        theta_true = jnp.array([target_cfg['theta_true']])
+        if target_cfg["x0_true"] is not None:
+            x0_true = jnp.array([target_cfg["x0_true"]])
+        else:
+            _, x0_true = sim.x0(key, 1)
+
+        from src.simulators import generate_trajectory
+        x_obs_target = generate_trajectory(key, sim, theta_true, x0_true, T=time_step)
+
+        print(f"--- Inference for {active_sim_name} with {time_step} time steps ---")
+        timer.start('inference')
+        samples_raw, final_sampler, num_samples = infer_many(
+            key, model_inference, trained_params, sim, x_obs_target)
+        timer.stop()
+
+        samples_raw_pretransform = np.array(samples_raw)
+
+        param_transform = None
+        if active_sim_name in ["LotkaVolterra", "SIR"]:
+            samples_raw = jnp.clip(samples_raw, a_min=-15.0, a_max=5.0)
+            samples_raw = jnp.exp(samples_raw)
+            param_transform = jnp.exp
+
+        # ── Save results for future reuse ──
+        save_results(result_dir, samples_raw, samples_raw_pretransform,
+                     x_obs_target, theta_true, train_losses, val_losses,
+                     num_samples, time_step, active_sim_name)
 
     os.makedirs(plot_dir, exist_ok=True)
 
@@ -340,14 +424,15 @@ if __name__ == "__main__":
         simulation_name=active_sim_name,
     )
 
-    # 6) Reverse SDE trajectory
-    plot_reverse_trajectory(
-        final_sampler,
-        key,
-        x_obs_target,
-        theta_true,
-        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_N={num_samples}_trajectory.png",
-    )
+    # 6) Reverse SDE trajectory (only if sampler is available, i.e. not from cache)
+    if final_sampler is not None:
+        plot_reverse_trajectory(
+            final_sampler,
+            key,
+            x_obs_target,
+            theta_true,
+            save_path=f"{plot_dir}/{active_sim_name}_{time_step}_N={num_samples}_trajectory.png",
+        )
 
     # 7) Sliced Wasserstein Distance (posterior vs prior)
     swd_val, _ = compute_swd_vs_prior(key, sim, samples_raw)
@@ -356,3 +441,69 @@ if __name__ == "__main__":
     print(f"  - Higher = posterior is more concentrated (good)")
     print(f"  - Near 0 = posterior ≈ prior (uninformative)")
     print(f"{'='*50}")
+
+    # ────────────────────────────────────────────────────────────
+    # 8) Quantitative Evaluation Metrics
+    # ────────────────────────────────────────────────────────────
+    timer.start('metrics_computation')
+
+    print("\nComputing quantitative metrics...")
+
+    # 8a) Posterior accuracy vs ground truth
+    accuracy = posterior_accuracy_metrics(samples_raw, theta_true)
+
+    # 8b) Posterior concentration
+    concentration = posterior_concentration_metrics(samples_raw, theta_true)
+
+    # 8c) Reverse SDE divergence diagnostics (on pre-transform samples)
+    divergence = reverse_sde_diagnostics(samples_raw_pretransform)
+
+    # 8d) GAUSS composition stability (only when model is available)
+    gauss_stab = {}
+    if final_sampler is not None:
+        sde = SDE()
+        gauss_fn = GAUSSScoreFn(
+            score_net=model_inference,
+            params=trained_params,
+            sde=sde,
+            prior=sim,
+            diffuser=final_sampler,
+            marginal_prior_fn=lambda a, t: marginal_prior_score(a, t, sde, sim.prior_var),
+            num_samples=min(200, max(50, 10 * sim.d_theta)),
+        )
+        probe_a_values = [0.1, 0.3, 0.5, 0.7, 0.9]
+        theta_probe = jnp.zeros(sim.d_theta)
+        gauss_stab = gauss_stability_metrics(gauss_fn, probe_a_values, theta_probe, x_obs_target)
+    else:
+        print("  (GAUSS stability metrics skipped — using cached results)")
+
+    # 8e) Posterior predictive metrics
+    pred_metrics = posterior_predictive_metrics(
+        key, sim, samples_raw, x_obs_target, param_transform=None, n_traj=50
+    )
+
+    timer.stop()
+
+    # Collect timing
+    timing = timer.summary()
+
+    # Aggregate all metrics
+    all_metrics = {
+        'accuracy': accuracy,
+        'concentration': concentration,
+        'divergence': divergence,
+        'gauss_stability': gauss_stab,
+        'predictive': pred_metrics,
+        'timing': timing,
+        'swd_vs_prior': swd_val,
+    }
+
+    # Print to console
+    print_metrics_summary(all_metrics, simulation_name=f"{active_sim_name} (T={time_step})")
+
+    # Save metrics table as image
+    generate_metrics_table(
+        all_metrics,
+        save_path=f"{plot_dir}/{active_sim_name}_{time_step}_N={num_samples}_metrics.png",
+        simulation_name=f"{active_sim_name} (T={time_step})",
+    )
