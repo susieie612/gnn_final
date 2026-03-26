@@ -462,12 +462,16 @@ if __name__ == "__main__":
     gauss_stab = {}
     if final_sampler is not None:
         sde = SDE()
+        grid = jnp.geomspace(1e-2, 1.0, 100)
+        # Build a LOCAL sampler (raw ScoreMLP), not the composed final_sampler
+        local_kernel = EulerMaruyama(model_inference, trained_params, sde)
+        local_sampler = Diffuser(local_kernel, grid, (sim.d_theta,), sde)
         gauss_fn = GAUSSScoreFn(
             score_net=model_inference,
             params=trained_params,
             sde=sde,
             prior=sim,
-            diffuser=final_sampler,
+            diffuser=local_sampler,
             marginal_prior_fn=lambda a, t: marginal_prior_score(a, t, sde, sim.prior_var),
             num_samples=min(200, max(50, 10 * sim.d_theta)),
         )
