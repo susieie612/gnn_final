@@ -1,6 +1,6 @@
 # src/config.py
 config = {
-    "active_sim":"DoubleWellSDE", ## change this part to use different simulator
+    "active_sim":"LinearSDE", ## change this part to use different simulator
     
     "model": {
         "hidden_dim": 128,
@@ -28,10 +28,10 @@ config = {
             "params": {"dim": 5, "sigma": 1.0},
             "target": {"theta_true": [0.5, 0.5, 0.5, 0.5, 0.5], "x0_true": [0.0, 0.0, 0.0, 0.0, 0.0], "time_steps": 50}
         },
-        "PeriodicSDE": { ## currently not working
+        "PeriodicSDE": { 
             "name": "PeriodicSDE",
             "params": {"dt": 0.05, "sigma": 0.5},
-            "target": {"theta_true": [2.0, 0.0], "x0_true": [1.0, 0.0], "time_steps": 5}
+            "target": {"theta_true": [2.0, 0.0], "x0_true": [1.0, 0.0], "time_steps": 1}
         },
         "LinearSDE": {  # diagonal version: d_theta=6, much more stable
             "name": "LinearSDE",
@@ -39,7 +39,7 @@ config = {
             "target": {
                 "theta_true": [0.1, -0.2, 0.3, 0.5, 0.5, 0.5],
                 "x0_true": [1.0, 0.5, -0.5],
-                "time_steps": 10
+                "time_steps": 1
             }
         },
         "LinearSDE_full": {  # original full version: d_theta=18
@@ -53,8 +53,8 @@ config = {
         },
         "DoubleWellSDE": {
             "name": "DoubleWellSDE",
-            "params": {"dt": 0.01, "sigma": 0.5, "dim": 1},
-            "target": {"theta_true": [1.0, -0.5], "x0_true": [0.1], "time_steps": 50}
+            "params": {"dt": 0.01, "sigma": 0.1, "dim": 1},
+            "target": {"theta_true": [1.0, -0.5], "x0_true": [0.1], "time_steps": 1}
         },
         "LotkaVolterra": {
             "name": "LotkaVolterra",
@@ -63,8 +63,8 @@ config = {
         },
         "SIR": {
             "name": "SIR",
-            "params": {"sigma": 0.05, "dt": 0.1},
-            "target": {"theta_true": [0.2, 0.1], "x0_true": [0.99, 0.01, 0.0], "time_steps": 50}
+            "params": {"sigma": 0.1, "dt": 0.1},
+            "target": {"theta_true": [0.2, 0.1], "x0_true": [0.99, 0.01, 0.0], "time_steps": 1}
         },
         "KolmogorovFlow": {
             "name": "KolmogorovFlow",
