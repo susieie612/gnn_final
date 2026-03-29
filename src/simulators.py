@@ -23,6 +23,27 @@ class GaussianRandomWalk:
         eps = self.sigma * random.normal(key, x.shape) 
         return self.alpha * x + theta + eps 
 
+class MixtureRandomWalk1D:
+    def __init__(self, dim=1, sigma=1.0):
+        self.dim = dim
+        self.sigma = sigma
+        self.d_x = dim
+        self.d_theta = dim
+        self.prior_var = 3.0  # Var(Uniform(-3,3))
+        
+    def prior(self, key, batch): 
+        return random.uniform(key, (batch, self.dim), minval=-3.0, maxval=3.0) 
+    
+    def proposal(self, key, batch):
+        x = random.normal(key, (batch, self.dim)) 
+        return key, x
+    
+    def transition(self, key, x, theta):
+        u_key, eps_key = random.split(key)
+        u = random.choice(u_key, jnp.array([-1.0, 1.0]), shape=(x.shape[0], 1))
+        eps = self.sigma * random.normal(eps_key, x.shape)
+        return x + u * theta + eps
+
 class MixtureRandomWalk:
     def __init__(self, dim=5, sigma=1.0):
         self.dim = dim

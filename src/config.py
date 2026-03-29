@@ -1,6 +1,6 @@
 # src/config.py
 config = {
-    "active_sim":"GaussianRandomWalk", ## change this part to use different simulator
+    "active_sim":"LotkaVolterra", ## change this part to use different simulator
     
     "model": {
         "hidden_dim": 128,
@@ -21,17 +21,17 @@ config = {
         "GaussianRandomWalk": {
             "name": "GaussianRandomWalk",
             "params": {"dim": 1, "alpha": 0.9, "sigma": 1.0},
-            "target": {"theta_true": [0.5], "x0_true": [0.0], "time_steps": 10}
+            "target": {"theta_true": [0.5], "x0_true": [0.0], "time_steps": 50}
         },
         "MixtureRandomWalk": {
             "name": "MixtureRandomWalk",
             "params": {"dim": 5, "sigma": 1.0},
-            "target": {"theta_true": [0.5, 0.5, 0.5, 0.5, 0.5], "x0_true": [0.0, 0.0, 0.0, 0.0, 0.0], "time_steps": 50}
+            "target": {"theta_true": [0.5, 0.5, 0.5, 0.5, 0.5], "x0_true": [0.0, 0.0, 0.0, 0.0, 0.0], "time_steps": 1}
         },
         "PeriodicSDE": { 
             "name": "PeriodicSDE",
             "params": {"dt": 0.05, "sigma": 0.5},
-            "target": {"theta_true": [2.0, 0.0], "x0_true": [1.0, 0.0], "time_steps": 1}
+            "target": {"theta_true": [2.0, 0.0], "x0_true": [1.0, 0.0], "time_steps": 50}
         },
         "LinearSDE": {  # diagonal version: d_theta=6, much more stable
             "name": "LinearSDE",
@@ -39,7 +39,7 @@ config = {
             "target": {
                 "theta_true": [0.1, -0.2, 0.3, 0.5, 0.5, 0.5],
                 "x0_true": [1.0, 0.5, -0.5],
-                "time_steps": 1
+                "time_steps": 50
             }
         },
         "LinearSDE_full": {  # original full version: d_theta=18
@@ -48,7 +48,7 @@ config = {
             "target": {
                 "theta_true": [0.1] * 18,
                 "x0_true": [1.0, 0.5, -0.5],
-                "time_steps": 20
+                "time_steps": 1
             }
         },
         "DoubleWellSDE": {
@@ -58,8 +58,8 @@ config = {
         },
         "LotkaVolterra": {
             "name": "LotkaVolterra",
-            "params": {"sigma": 0.05, "dt": 0.1},
-            "target": {"theta_true": [0.6, 0.025, 0.8, 0.025], "x0_true": [10.0, 5.0], "time_steps": 10}
+            "params": {"sigma": 0.1, "dt": 0.1},
+            "target": {"theta_true": [0.6, 0.025, 0.8, 0.025], "x0_true": [10.0, 5.0], "time_steps": 50}
         },
         "SIR": {
             "name": "SIR",

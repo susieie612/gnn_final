@@ -22,7 +22,7 @@ class ScoreMLP(nn.Module):
 
         h = x_emb + theta_emb + a_emb
 
-        for _ in range(3):
+        for _ in range(5):
             res = h
             h = nn.Dense(self.h_dim)(h)
             h = nn.relu(h)
