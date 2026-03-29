@@ -1,6 +1,6 @@
 # src/config.py
 config = {
-    "active_sim":"LotkaVolterra", ## change this part to use different simulator
+    "active_sim":"GaussianRandomWalk", ## change this part to use different simulator
     
     "model": {
         "hidden_dim": 128,
@@ -21,7 +21,7 @@ config = {
         "GaussianRandomWalk": {
             "name": "GaussianRandomWalk",
             "params": {"dim": 1, "alpha": 0.9, "sigma": 1.0},
-            "target": {"theta_true": [0.5], "x0_true": [0.0], "time_steps": 50}
+            "target": {"theta_true": [0.5], "x0_true": [0.0], "time_steps": 10}
         },
         "MixtureRandomWalk": {
             "name": "MixtureRandomWalk",
