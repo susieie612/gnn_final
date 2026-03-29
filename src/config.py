@@ -1,6 +1,6 @@
 # src/config.py
 config = {
-    "active_sim":"GaussianRandomWalk", ## change this part to use different simulator
+    "active_sim":"LinearSDE", ## change this part to use different simulator
     
     "model": {
         "hidden_dim": 128,
