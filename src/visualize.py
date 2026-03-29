@@ -6,6 +6,48 @@ import jax
 import jax.numpy as jnp
 import os
 
+def plot_posterior_samples2(samples, theta_true, param_names=None, save_path=None, simulation_name=None, simulation_length=None):
+    """
+    Compare the inferred posterior and the ground truth
+    """
+    # samples: (num_samples, d_theta), theta_true: (1, d_theta)
+    d_theta = samples.shape[1]
+    theta_true_flat = np.array(theta_true).flatten()
+
+    # if param_names is None:
+    #     param_names = [f'theta_{i}' for i in range(d_theta)]
+
+    # cols = min(d_theta, 4)
+    # rows = math.ceil(d_theta / cols)
+    
+    # fig = plt.plot(rows, cols, figsize=(4 * cols, 4 * rows))
+
+    for i in range(d_theta):
+        # Posterior histogram
+        plt.hist(samples[:, i], bins=30, alpha=0.6, histtype='step', density=True, label=rf'$\theta_{i}$')
+
+    # Ground Truth 
+    plt.axvline(theta_true_flat[i], color='red', linestyle='--', 
+                    linewidth=2, label='True Value')
+    
+    plt.title(f'Posterior of {simulation_name}')
+    plt.xlabel('Value')
+    plt.ylabel('Density')
+    plt.legend()
+
+    # for j in range(i + 1, len(axes)):
+    #     fig.delaxes(axes[j])
+
+    # if simulation_name is not None:
+    #     if simulation_length is not None:
+    #         plt.suptitle(f'{simulation_name} with T={simulation_length}')
+
+    plt.tight_layout()
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
 
 
 def plot_posterior_samples(samples, theta_true, param_names=None, save_path=None, simulation_name=None, simulation_length=None):
